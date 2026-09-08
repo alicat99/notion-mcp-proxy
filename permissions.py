@@ -15,27 +15,69 @@ class Permissions:
         config = tomllib.loads(Path(__file__).with_name("permissions.toml").read_text(encoding="utf-8"))
         self.root_path = tuple(config["fetch"]["root_path"])
 
+    #region Access checks
+
     async def fetch(self, arguments):
         id = arguments["id"]
         uri = urlsplit(id)
         if id == "self" or (uri.scheme == "notion" and uri.netloc == "docs" and uri.path.startswith("/")):
             return await self.call("notion-fetch", arguments)
+        result, _, _ = await self._inspect(arguments)
+        return result
+
+    async def require_parent(self, parent):
+        kinds = {"page_id": "page", "database_id": "database", "data_source_id": "data_source"}
+        if not isinstance(parent, dict):
+            raise PermissionError("An explicit parent is required")
+        keys = set(parent) - {"type"}
+        if len(keys) != 1 or not keys <= kinds.keys():
+            raise PermissionError("Specify exactly one page, database or data source parent")
+        key = next(iter(keys))
+        if parent.get("type", key) != key:
+            raise PermissionError("Parent type does not match its ID")
+        id = parent[key]
+        object_id(id)
+        if key == "data_source_id":
+            id = "collection://" + object_id(id)
+        _, entity, _ = await self._inspect({"id": id}, {kinds[key]})
+        if key == "database_id":
+            # An implicit row destination must resolve to one verified source.
+            sources, _ = database_members(entity)
+            if len(sources) != 1:
+                raise PermissionError("Database parent must have one data source")
+            await self._inspect({"id": "collection://" + next(iter(sources))}, {"data_source"})
+
+    async def require_target(self, id, kinds, *, allow_root=True):
+        object_id(id)
+        _, _, is_root = await self._inspect({"id": id}, kinds)
+        if is_root and not allow_root:
+            raise PermissionError("The allowed root cannot be moved")
+        return is_root
+
+    #endregion
+
+    #region Object inspection
+
+    async def _inspect(self, arguments, kinds=None):
         if not self.root_path:
-            raise PermissionError("Fetch root is not configured")
+            raise PermissionError("Permission root is not configured")
         result, entity = await self._fetch_entity(arguments)
         kind = entity["metadata"]["type"]
+        if kinds is not None and kind not in kinds:
+            raise PermissionError("Unexpected target entity type")
+        is_root = False
         if kind == "page":
             # path excludes the page itself; use ancestry to recognize the root.
             if "path" in entity:
                 path = tuple(entity["path"].split(" / "))
             else:
                 path = database_path(entity)
-            self._check_path(path, entity["title"])
+            is_root = self._check_path(path, entity["title"])
         elif kind == "database":
-            self._check_path(database_path(entity), entity["title"])
+            is_root = self._check_path(database_path(entity), entity["title"])
         elif kind in {"data_source", "view"}:
             source = entity
-            source_id = object_id(id)
+            source_id = object_id(arguments["id"])
             if kind == "view":
                 source_url = view_source(entity)
                 source_id = object_id(source_url)
@@ -48,11 +90,11 @@ class Permissions:
             self._check_path(database_path(database), database["title"])
             sources, views = database_members(database)
             # Multiple/linked sources need an ownership contract not supplied by fetch.
-            if sources != {source_id} or (kind == "view" and object_id(id) not in views):
+            if sources != {source_id} or (kind == "view" and object_id(arguments["id"]) not in views):
                 raise PermissionError("Cannot verify data source or view membership")
         else:
             raise PermissionError("Unsupported fetch entity type")
-        return result
+        return result, entity, is_root
 
     async def _fetch_entity(self, arguments):
         result = await self.call("notion-fetch", arguments)
@@ -69,6 +111,12 @@ class Permissions:
         root = self.root_path
         if ancestors[:len(root)] != root and ancestors + (title,) != root:
             raise PermissionError("Fetch target is outside the allowed root")
+        return ancestors + (title,) == root
+
+    #endregion
+
+
+#region Response parsing
 
 
 def database_path(entity):
@@ -113,3 +161,5 @@ def object_id(value):
     if not match:
         raise PermissionError("Unrecognized entity ID")
     return UUID(match[1]).hex
+
+#endregion

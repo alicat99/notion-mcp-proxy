@@ -7,7 +7,7 @@ import sys
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import uvicorn
 from mcp import Client
@@ -23,7 +23,8 @@ from mcp.types import (
 )
 
 from server import create_bridge
-from tool_functions import BLOCKED_TOOLS, NotionTools, TOOL_METHODS
+from tool_functions import NotionTools, TOOL_METHODS
+from tool_runtime import BLOCKED_TOOLS
 from upstream import connect_upstream
 
 
@@ -98,6 +99,13 @@ async def check_bridge():
         ),
         Tool(name="notion-check-mcp-next-steps", input_schema={"type": "object"}),
         Tool(name="notion-stop-session", input_schema={"type": "object"}),
+        Tool(name="notion-fetch", input_schema={
+            "type": "object", "required": ["id"], "properties": {
+                "id": {"type": "string"},
+                "include_transcript": {"type": "boolean"},
+                "include_discussions": {"type": "boolean"},
+            },
+        }),
     ]
 
     async def list_tools(ctx, params):
@@ -107,6 +115,11 @@ async def check_bridge():
 
     async def call_tool(ctx, params):
         calls.append((params.name, params.arguments))
+        if params.name == "notion-fetch":
+            return CallToolResult(content=[TextContent(type="text", text=json.dumps({
+                "metadata": {"type": "page"}, "title": "child",
+                "path": "홈 / test" if params.arguments["id"] == "1" * 32 else "outside",
+            }))])
         if params.name == "notion-check-mcp-next-steps":
             return CallToolResult(
                 content=[TextContent(type="text", text="upstream tool failure")],
@@ -125,7 +138,8 @@ async def check_bridge():
         async with connect_upstream(remote_url, use_oauth=False) as upstream:
             discovered = await upstream.list_tools()
             assert [tool.name for tool in discovered] == [tool.name for tool in tools]
-            bridge = create_bridge(discovered, upstream)
+            with patch("permissions.tomllib.loads", return_value={"fetch": {"root_path": ["홈", "test"]}}):
+                bridge = create_bridge(discovered, upstream)
             async with serve_http(bridge) as bridge_url:
                 process = await asyncio.create_subprocess_exec(
                     sys.executable, "-X", "utf8", "client.py", "--url", bridge_url,
@@ -133,7 +147,7 @@ async def check_bridge():
                 )
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
                 assert process.returncode == 0, stderr.decode("utf-8")
-                assert len(json.loads(stdout)["tools"]) == 2
+                assert len(json.loads(stdout)["tools"]) == 3
                 process = await asyncio.create_subprocess_exec(
                     sys.executable, "-X", "utf8", "client.py", "--url", bridge_url,
                     "--tool", "notion-check-mcp-next-steps",
@@ -148,7 +162,7 @@ async def check_bridge():
                     arguments = {
                         "pages": [{"title": "테스트", "properties": {"tags": [1, False, None]}}],
                         "allow_async": False,
-                        "parent": None,
+                        "parent": {"page_id": "1" * 32},
                     }
                     result = await client.call_tool(tools[0].name, arguments)
                     assert calls[-1] == (tools[0].name, arguments)
@@ -158,6 +172,16 @@ async def check_bridge():
                     error = await client.call_tool(tools[1].name, {})
                     assert error.is_error
                     assert error.content[0].text == "upstream tool failure"
+                    before_writes = sum(name == tools[0].name for name, _ in calls)
+                    try:
+                        await client.call_tool(tools[0].name, {
+                            **arguments, "parent": {"page_id": "2" * 32},
+                        })
+                    except MCPError as error:
+                        assert error.code == -32003
+                    else:
+                        raise AssertionError("Outside parent was accepted")
+                    assert sum(name == tools[0].name for name, _ in calls) == before_writes
                     before = len(calls)
                     for name in BLOCKED_TOOLS:
                         try:
@@ -176,8 +200,9 @@ async def check_bridge():
                     assert len(calls) == before
 
             functions = NotionTools(upstream, discovered)
-            result = await functions.create_pages(pages=[], allow_async=True)
-            assert result.structured_content == {"pages": [], "allow_async": True}
+            functions.runtime.permissions.root_path = ("홈", "test")
+            result = await functions.create_pages(pages=[], allow_async=True, parent={"page_id": "1" * 32})
+            assert result.structured_content == {"pages": [], "allow_async": True, "parent": {"page_id": "1" * 32}}
 
 
 @asynccontextmanager

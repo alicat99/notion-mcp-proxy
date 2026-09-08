@@ -8,7 +8,8 @@ from mcp.server import Server
 from mcp.shared.exceptions import MCPError
 from mcp.types import INVALID_PARAMS, ListToolsResult
 
-from tool_functions import BLOCKED_TOOLS, NotionTools
+from tool_functions import NotionTools
+from tool_runtime import BLOCKED_TOOLS
 from upstream import connect_upstream
 
 

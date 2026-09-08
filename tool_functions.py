@@ -1,4 +1,4 @@
-from tool_runtime import BLOCKED_TOOLS, UNSET, ToolRuntime
+from tool_runtime import UNSET, ToolRuntime
 
 
 class NotionTools:
@@ -95,12 +95,16 @@ class NotionTools:
 
     async def create_pages(self, *, pages, creation_mode=UNSET, parent=UNSET, allow_async=UNSET):
         """부모 위치와 속성·본문을 지정해 페이지들을 만든다."""
-        return await self.runtime.call("notion-create-pages", {
+        arguments = self.runtime.validate("notion-create-pages", {
             "pages": pages,
             "creation_mode": creation_mode,
             "parent": parent,
             "allow_async": allow_async,
         })
+        if "creation_mode" in arguments:
+            raise PermissionError("Draft creation has no verified parent destination")
+        await self.runtime.permissions.require_parent(arguments.get("parent"))
+        return await self.runtime.call("notion-create-pages", arguments)
 
     async def update_page(
         self, *,
@@ -121,7 +125,7 @@ class NotionTools:
         allow_async=UNSET,
     ):
         """명령에 따라 페이지 속성·본문·아이콘 등을 수정한다."""
-        return await self.runtime.call("notion-update-page", {
+        arguments = self.runtime.validate("notion-update-page", {
             "page_id": page_id,
             "command": command,
             "properties": properties,
@@ -138,6 +142,11 @@ class NotionTools:
             "is_skill": is_skill,
             "allow_async": allow_async,
         })
+        is_root = await self.runtime.permissions.require_target(page_id, {"page"})
+        if is_root and arguments.get("properties"):
+            # Ordinary root pages only support title properties; reject aliases as well.
+            raise PermissionError("The allowed root's properties cannot be changed")
+        return await self.runtime.call("notion-update-page", arguments)
 
     async def convert_page_to_skill(self, *, page_url):
         """기존 페이지를 Notion Skill로 지정한다."""
@@ -153,10 +162,14 @@ class NotionTools:
 
     async def move_pages(self, *, page_or_database_ids, new_parent):
         """페이지 또는 데이터베이스들을 다른 부모로 이동한다."""
-        return await self.runtime.call("notion-move-pages", {
+        arguments = self.runtime.validate("notion-move-pages", {
             "page_or_database_ids": page_or_database_ids,
             "new_parent": new_parent,
         })
+        await self.runtime.permissions.require_parent(new_parent)
+        for id in page_or_database_ids:
+            await self.runtime.permissions.require_target(id, {"page", "database"}, allow_root=False)
+        return await self.runtime.call("notion-move-pages", arguments)
 
     async def duplicate_page(self, *, page_id):
         """페이지를 복제하고 비동기 작업 정보를 반환한다."""
