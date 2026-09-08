@@ -1,7 +1,7 @@
 # Notion MCP Python bridge
 
 Notion MCP의 클라이언트이면서 로컬 MCP 서버로 동작하는 Python 브릿지다.
-시작할 때 원격 도구 목록의 모든 페이지를 읽어 도구마다 Python async 함수를 생성하고,
+시작할 때 원격 도구 목록의 모든 페이지를 읽어 미리 작성된 Python 메서드에 연결하고,
 같은 이름·설명·입력 스키마·출력 스키마를 로컬 MCP 클라이언트에 제공한다.
 페이지 권한 관리 레이어와 도구 허용 목록은 아직 없다.
 
@@ -10,16 +10,26 @@ client.py
   → tools/call {name, arguments}
 server.py                 MCP 요청 파싱 / 함수 선택 / MCP 응답
   → functions[name](**arguments)
-tool_functions.py         순수 Python 함수 / JSON Schema 검사 / 향후 권한 검사 위치
+tool_functions.py         42개 명시적 Python 메서드 / JSON Schema 검사 / 향후 권한 검사 위치
   → upstream.call_tool(name, arguments)
 upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응답 수신
   → https://mcp.notion.com/mcp
 ```
 
 도구별로 달라지는 것은 이름과 인자 JSON이다. 전송 형식은 공통이므로 `upstream.py`에 분리했다.
-스키마에서 Python 소스를 생성하거나 `exec()`하지 않는다. 각 도구를 closure로 감싼 실제 async 함수를
-딕셔너리에 보관한다. Python 함수 시그니처는 `**arguments`이며, 상세 인자 명세는 원래 JSON Schema로 유지한다.
-함수 이름을 Python 식별자로 바꾸지 않으므로 하이픈이 있는 Notion 도구 이름도 충돌 없이 그대로 사용한다.
+`tool_functions.py`의 `NotionTools` 클래스에 42개 도구가 각각 `async def`로 존재한다.
+`fetch`, `search`, `create_pages`, `update_page`처럼 이름·인자·설명을 코드에서 직접 확인하고 수정한다.
+필수 인자는 기본값 없이, 선택 인자는 `UNSET`으로 선언한다. 선택 인자를 생략하면 전송하지 않고,
+명시적으로 전달한 `None`, `False`, 빈 목록은 보존한다. 단, 실제 값은 서버 스키마 검증을 통과해야 한다.
+중첩 인자는 원래 JSON 구조를 유지한다. 예를 들어 `query_data_sources(data=...)`의 모드별 필드는 data 내부에 넣는다.
+
+파일 하단의 `TOOL_METHODS`가 MCP 이름과 Python 메서드를 명시적으로 연결한다.
+예: `notion-fetch` → `fetch`, `notion-create-pages` → `create_pages`.
+새 함수를 런타임에 생성하거나 인자 제한 없는 함수를 대신 노출하지 않는다.
+
+`notion_tools.json`에는 2026-09-08 실제 Notion MCP의 tools/list로 받은 42개 도구의 설명과 전체 스키마를 저장했다.
+도구 구현 시 참고하는 목록이며 런타임 권한·실행 가능 여부를 보장하지 않는다. 서버는 시작할 때 실시간 스키마를 사용한다.
+이번 조회에서는 원격 도구 메타데이터만 저장했으며 OAuth 자격 증명은 포함하지 않았다.
 
 ## 설치
 
@@ -109,26 +119,38 @@ MCP 결과는 `content`, `structuredContent`, `isError` 등을 포함한다.
 
 ```python
 import asyncio
-from tool_functions import build_functions
+from tool_functions import NotionTools
 from upstream import connect_upstream
 
 async def main():
     async with connect_upstream("https://mcp.notion.com/mcp") as upstream:
-        functions = build_functions(await upstream.list_tools(), upstream)
-        result = await functions["notion-fetch"](id="self")
+        tools = NotionTools(upstream, await upstream.list_tools())
+        result = await tools.fetch(id="self")
         print(result.model_dump_json(indent=2, by_alias=True))
 
 asyncio.run(main())
 ```
 
 `tool_functions.py`는 MCP 서버나 HTTP 프레임워크를 import하지 않는다.
-권한 관리 추가 시 `invoke()`의 입력 검증과 `upstream.call_tool()` 사이에 검사를 넣는다.
-직접 Python 호출도 같은 검사를 거친다. 도구별 정책이 필요하면 `tool.name`으로 분기할 수 있다.
-아직 이 파일에는 페이지 권한 검사가 없으며 JSON Schema 검사만 있다.
+페이지 조회 정책은 `fetch()`에, 페이지 수정 정책은 `update_page()`에 추가할 수 있다.
+공통 정책은 `_call()`의 스키마 검증과 `upstream.call_tool()` 사이에 추가한다.
+MCP 호출과 직접 Python 호출 모두 같은 메서드를 거친다. 아직 권한 검사는 구현하지 않았다.
+
+새 도구 추가 방법:
+
+1. 실제 tools/list의 이름·설명·inputSchema를 확인한다.
+2. 클래스에 명시적인 async 메서드를 추가하고 필수·선택 인자를 선언한다.
+3. 메서드에서 인자를 딕셔너리로 구성해 `_call("원래 MCP 이름", arguments)`에 전달한다.
+4. `TOOL_METHODS`에 MCP 이름과 메서드 이름을 등록한다.
+5. `notion_tools.json` 참고 스키마와 테스트를 업데이트하고 서버를 재시작한다.
+
+서버에 새 도구가 생겼는데 명시적 메서드가 없으면 시작을 중단하고 도구 이름을 알려준다.
+실시간 스키마의 최상위 인자 이름과 메서드 시그니처가 달라진 경우에도 수정할 도구를 알려준다.
+이는 중간 브릿지와 코드상의 도구 목록이 서로 달라진 채 동작하는 것을 방지한다.
 
 ## 연결과 지원 범위
 
-- 서버 시작 시 발견한 모든 도구를 노출한다. 도구가 추가·삭제되거나 스키마가 바뀌면 서버를 재시작한다.
+- 서버 시작 시 발견한 도구들을 명시적 메서드에 연결해 노출한다. 현재 연결에서 노출되지 않은 메서드는 호출할 수 없다. 도구 목록 변경은 재시작 시 반영하고, 새로운 도구·인자는 위 절차로 코드를 수정한다.
 - 실제 실행 가능 여부는 Notion 사용자 권한·요금제에 따른다.
 - 상위 연결 하나를 공유하며 요청을 직렬화한다. 토큰 동시 갱신을 피하기 위한 단일 프로세스 구성이다.
 - 동일 OAuth 저장소를 쓰는 서버·직접 호출 스크립트를 동시에 실행하지 않는다. 프로세스 간 잠금은 없다.
@@ -167,7 +189,8 @@ uv run --frozen python -X utf8 -m unittest discover -s tests -v
 
 테스트는 실제 HTTP 포트에 가짜 상위 MCP와 브릿지를 실행한다. 도구 목록 페이지네이션,
 스키마 보존, 중첩 인자, 한글·이미지·구조화 결과, 오류 결과, 잘못된 요청 차단,
-Python 래퍼 직접 호출과 최소 CLI 프로세스 실행을 검증한다. Notion 계정이나 OAuth 승인은 필요 없다.
+Python 래퍼 직접 호출과 최소 CLI 프로세스 실행을 검증한다. 42개 스키마와 명시적 메서드의 일치,
+선택 인자의 생략/null/false 구분, 새 도구·변경된 인자 감지도 검증한다. Notion 계정이나 OAuth 승인은 필요 없다.
 실제 Notion과의 OAuth·도구 호출은 별도 로그인 후 확인해야 한다.
 
 다른 테스트용 MCP를 중계할 때만 다음 옵션을 사용한다.
