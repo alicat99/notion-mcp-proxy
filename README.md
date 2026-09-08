@@ -3,7 +3,7 @@
 Notion MCP의 클라이언트이면서 로컬 MCP 서버로 동작하는 Python 브릿지다.
 시작할 때 원격 도구 목록의 모든 페이지를 읽어 미리 작성된 Python 메서드에 연결하고,
 같은 이름·설명·입력 스키마·출력 스키마를 로컬 MCP 클라이언트에 제공한다.
-`notion-fetch`에는 루트 경로 기반 조회 권한 검사가 있다. 에이전트·세션 관련 10개 도구는 접근을 거부한다.
+`notion-fetch`, `notion-create-pages`, `notion-update-page`, `notion-move-pages`에 공통 루트 경로 기반 권한 검사를 적용한다. 에이전트·세션 관련 10개 도구는 접근을 거부한다.
 나머지 검색·조회·수정 도구에는 아직 페이지 권한 검사가 없으므로 서버 전체의 접근 제한으로 간주하면 안 된다.
 
 ```text
@@ -11,8 +11,10 @@ client.py
   → tools/call {name, arguments}
 server.py                 MCP 요청 파싱 / 함수 선택 / MCP 응답
   → functions[name](**arguments)
-tool_functions.py         42개 명시적 Python 메서드 / JSON Schema 검사 / fetch 권한 정책
-  → upstream.call_tool(name, arguments)
+tool_functions.py         42개 명시적 Python 메서드 / 도구별 정책 적용
+  → tool_runtime.py       도구 등록 / JSON Schema 검사 / 공통 호출
+  → permissions.py        내부 fetch / 공통 소속 검사 / 부모·대상 검사
+  → tool_runtime.call(name, arguments)
 upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응답 수신
   → https://mcp.notion.com/mcp
 ```
@@ -32,9 +34,9 @@ upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응�
 도구 구현 시 참고하는 목록이며 런타임 권한·실행 가능 여부를 보장하지 않는다. 서버는 시작할 때 실시간 스키마를 사용한다.
 이번 조회에서는 원격 도구 메타데이터만 저장했으며 OAuth 자격 증명은 포함하지 않았다.
 
-## fetch 허용 루트 설정
+## 공통 허용 루트 설정
 
-프로젝트의 `permissions.toml`에서 절대 제목 경로를 배열로 지정한다.
+프로젝트의 `permissions.toml`에서 절대 제목 경로를 배열로 지정한다. 기존 설정과 호환되도록 `[fetch]` 이름을 유지하지만, 네 도구가 모두 같은 루트를 사용한다.
 
 ```toml
 [fetch]
@@ -42,7 +44,7 @@ root_path = ["홈", "test"]
 ```
 
 루트 자체와 하위 페이지를 허용한다. 경로 구성요소를 비교하므로 `test-other`는 `test`의 하위로 취급하지 않는다.
-기본값 `[]`는 객체 조회를 모두 거부한다. 설정은 서버 시작 시 읽으므로 변경 후 서버를 재시작한다.
+기본값 `[]`는 객체 조회와 위 세 도구의 쓰기를 모두 거부한다. 설정은 서버 시작 시 읽으므로 변경 후 서버를 재시작한다.
 직접 Python으로 사용할 때도 `NotionTools` 생성 시 같은 파일을 읽는다.
 
 | fetch 대상 | 정책 |
@@ -63,15 +65,56 @@ root_path = ["홈", "test"]
 현재 범위와 전제:
 
 - 제목 기반 절대 경로가 정확하고 루트 이름이 유일하다는 전제다. UUID 기반 루트 고정 기능은 없다.
-- 직접 생성한 단일 데이터 소스 DB에서 검증했다. 소스가 여러 개인 DB는 거부한다.
+- 직접 생성한 단일 데이터 소스 DB에서 검증했다. 복수 데이터 소스의 소스·뷰 조회 및 DB를 부모로 하는 생성·이동은 거부한다. DB 객체 자체의 조회는 경로로 판정한다.
 - 데이터 소스 응답의 DB URL을 소속 DB로 사용한다. 외부 링크·외부 동기화 소스에 대한 소유 관계 보장은 아직 검증하지 않았으므로 해당 구성은 지원 범위 밖이다.
 - 뷰 ID가 추적한 DB의 뷰 목록에 없으면 거부한다. 다른 위치의 링크된 뷰는 허용되지 않을 수 있다.
 - 링크·임베드된 외부 페이지를 별도로 읽기 허용하지 않는다. 해당 페이지를 fetch하면 자체 경로로 검사한다.
 - 허용된 페이지 응답 안의 링크·멘션·댓글 미리보기 등은 별도로 필터링하지 않는다. 동기화 블록은 사용하지 않는 전제다.
 - 여러 내부 조회 사이에 Notion 구조가 바뀌는 경우를 원자적으로 방지하지는 못한다.
-- 다른 도구의 검색 결과·수정 요청·비동기 작업은 이 정책으로 제한되지 않는다.
+- 위 네 도구 외의 검색 결과·수정 요청·비동기 작업 조회는 이 정책으로 제한되지 않는다.
 
-검증: 기존 HTTP 브릿지 테스트와 권한 테스트 총 10개 통과. 실제 `홈/test`의 루트·행·DB·소스·뷰 허용 및 상위 `홈` 거부를 읽기 전용으로 확인했다.
+## 페이지 생성·수정·이동 정책
+
+모든 쓰기는 스키마 검증 → 공통 소속 검사 → 도구별 제한 → 원격 요청 순서로 실행한다.
+쓰기 도구가 `NotionTools.fetch()`를 호출하지 않는다. `permissions.py`의 같은 객체 검사 로직을 사용하며,
+내부 조회에만 원격 `notion-fetch`를 사용한다. 조회용 `self`·문서 URI 예외는 쓰기에 적용되지 않는다.
+
+| 도구 | 검사 및 제한 |
+|---|---|
+| `notion-create-pages` | 명시적 `parent` 필수. 허용 루트 내부 부모만 허용. `creation_mode="draft"`는 목적지 동작 미확인으로 거부 |
+| `notion-update-page` | 대상이 허용 루트 내부의 페이지인지 검사. 루트 자체의 비어 있지 않은 `properties` 변경은 제목 변경 방지를 위해 거부. 루트 본문·아이콘·커버 수정은 허용 |
+| `notion-move-pages` | 목적지와 모든 원본을 검사한 뒤 한 번만 전달. 루트 자체 이동과 워크스페이스 최상위 이동은 거부. 원본은 페이지 또는 DB만 허용 |
+
+생성의 `parent`와 이동의 `new_parent`는 다음 중 하나를 사용한다.
+
+```json
+{"page_id": "부모 페이지 UUID"}
+```
+
+```json
+{"database_id": "부모 DB UUID"}
+```
+
+```json
+{"data_source_id": "부모 데이터 소스 UUID"}
+```
+
+선택적인 `type`은 ID 키와 같은 값이어야 한다. 여러 목적지 키 또는 알 수 없는 추가 부모 필드는 거부한다.
+`database_id` 부모는 단일 데이터 소스를 찾아 소속을 추가 검사한다. 데이터 소스 ID는 내부 조회 시
+`collection://` URI로 변환하며 실제 쓰기 요청의 인자는 그대로 유지한다.
+
+합의한 범위:
+
+- 템플릿 원본 권한은 검사하지 않는다. 명시적 템플릿 ID도 그대로 전달한다.
+- 양방향 관계에 따른 외부 변경은 이 프로젝트의 권한 보장 범위 밖이다. 관계 속성을 추가 검사하지 않는다.
+- 하위 페이지·DB 삭제는 허용한다. 실제 삭제를 허용하려면 호출자가 `allow_deleting_content: true`를 지정한다.
+- 링크·임베드만으로 외부 페이지의 쓰기 권한을 부여하지 않는다.
+- `allow_async` 등 실행 옵션은 원래 값으로 전달한다. 검사 후 실행 시점까지의 동시 이동·변경을 원자적으로 막지는 못한다.
+- 검사 실패 시 쓰기 요청을 보내지 않는다. Notion에 전달된 작업 자체의 원자성이나 실패 시 롤백을 보장하는 것은 아니다.
+
+검증: 자동 테스트 22개 통과. HTTP 브릿지의 권한 거부 응답, 일반 페이지·DB·데이터 소스 부모,
+행 수정, 루트 보호, 외부 대상·복합 이동 거부, 템플릿·삭제 옵션 전달을 가짜 상위 서버로 검증한다.
+이번 쓰기 권한 구현에서 실제 Notion 데이터 생성·수정·이동은 실행하지 않았다.
 
 ## 설치
 
@@ -196,15 +239,17 @@ asyncio.run(main())
 ```
 
 `tool_functions.py`는 MCP 서버나 HTTP 프레임워크를 import하지 않는다.
-페이지 조회 정책은 `fetch()`에 구현되어 있다. 응답 구조 파싱만 `fetch_permissions.py`로 분리했다.
-공통 정책은 `_call()`의 스키마 검증과 `upstream.call_tool()` 사이에 추가한다.
-MCP 호출과 직접 Python 호출 모두 같은 메서드와 fetch 권한 검사를 거친다.
+`tool_functions.py`에는 초기화 연결, 도구별 명시적 메서드와 `TOOL_METHODS` 목록이 있다.
+도구 등록·스키마 검증·공통 전송은 `tool_runtime.py`, 조회·소속 판정·응답 파싱은 `permissions.py`에 모았다.
+기존 `fetch_permissions.py`는 `permissions.py`로 통합했다.
+MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검사를 거친다.
+`runtime.call()`은 내부 전송용이며 페이지 권한 검사를 자체 수행하지 않는다. 외부 호출자는 항상 도구 메서드를 사용한다.
 
 새 도구 추가 방법:
 
 1. 실제 tools/list의 이름·설명·inputSchema를 확인한다.
 2. 클래스에 명시적인 async 메서드를 추가하고 필수·선택 인자를 선언한다.
-3. 메서드에서 인자를 딕셔너리로 구성해 `_call("원래 MCP 이름", arguments)`에 전달한다.
+3. 메서드에서 인자를 딕셔너리로 구성한다. 권한이 필요한 도구는 `runtime.validate()` 후 `runtime.permissions`로 검사하고, `runtime.call("원래 MCP 이름", arguments)`로 전달한다.
 4. `TOOL_METHODS`에 MCP 이름과 메서드 이름을 등록한다.
 5. `notion_tools.json` 참고 스키마와 테스트를 업데이트하고 서버를 재시작한다.
 
@@ -214,7 +259,7 @@ MCP 호출과 직접 Python 호출 모두 같은 메서드와 fetch 권한 검�
 
 ## 에이전트·세션 도구 차단
 
-`tool_functions.py`의 `BLOCKED_TOOLS`에 다음 10개를 명시했다.
+`tool_runtime.py`의 `BLOCKED_TOOLS`에 다음 10개를 명시했다.
 
 - `notion-search-agents`
 - `notion-search-sessions`
