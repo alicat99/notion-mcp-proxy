@@ -1,12 +1,13 @@
-"""Shared object lookup and root path permissions."""
+"""Shared entity membership and root path permissions."""
 
 import json
 import re
 import tomllib
 from pathlib import Path
-from urllib.parse import urlsplit
 from uuid import UUID
 from xml.etree import ElementTree
+
+from entity_lookup import fetch_entity
 
 
 class Permissions:
@@ -16,14 +17,6 @@ class Permissions:
         self.root_path = tuple(config["fetch"]["root_path"])
 
     #region Access checks
-
-    async def fetch(self, arguments):
-        id = arguments["id"]
-        uri = urlsplit(id)
-        if id == "self" or (uri.scheme == "notion" and uri.netloc == "docs" and uri.path.startswith("/")):
-            return await self.call("notion-fetch", arguments)
-        result, _, _ = await self._inspect(arguments)
-        return result
 
     async def require_parent(self, parent):
         kinds = {"page_id": "page", "database_id": "database", "data_source_id": "data_source"}
@@ -39,7 +32,7 @@ class Permissions:
         object_id(id)
         if key == "data_source_id":
             id = "collection://" + object_id(id)
-        _, entity, _ = await self._inspect({"id": id}, {kinds[key]})
+        entity, _ = await self._inspect({"id": id}, {kinds[key]})
         if key == "database_id":
             # An implicit row destination must resolve to one verified source.
             sources, _ = database_members(entity)
@@ -49,19 +42,27 @@ class Permissions:
 
     async def require_target(self, id, kinds, *, allow_root=True):
         object_id(id)
-        _, _, is_root = await self._inspect({"id": id}, kinds)
+        _, is_root = await self._inspect({"id": id}, kinds)
         if is_root and not allow_root:
             raise PermissionError("The allowed root cannot be moved")
         return is_root
+
+    def require_root(self):
+        if not self.root_path:
+            raise PermissionError("Permission root is not configured")
 
     #endregion
 
     #region Object inspection
 
     async def _inspect(self, arguments, kinds=None):
-        if not self.root_path:
-            raise PermissionError("Permission root is not configured")
-        result, entity = await self._fetch_entity(arguments)
+        self.require_root()
+        _, entity = await fetch_entity(self.call, arguments)
+        is_root = await self.check_entity(arguments["id"], entity, kinds)
+        return entity, is_root
+
+    async def check_entity(self, id, entity, kinds=None):
+        self.require_root()
         kind = entity["metadata"]["type"]
         if kinds is not None and kind not in kinds:
             raise PermissionError("Unexpected target entity type")
@@ -77,35 +78,24 @@ class Permissions:
             is_root = self._check_path(database_path(entity), entity["title"])
         elif kind in {"data_source", "view"}:
             source = entity
-            source_id = object_id(arguments["id"])
+            source_id = object_id(id)
             if kind == "view":
                 source_url = view_source(entity)
                 source_id = object_id(source_url)
-                _, source = await self._fetch_entity({"id": source_url})
+                _, source = await fetch_entity(self.call, {"id": source_url})
             if source["metadata"]["type"] != "data_source":
                 raise PermissionError("Cannot verify data source")
-            _, database = await self._fetch_entity({"id": source["url"]})
+            _, database = await fetch_entity(self.call, {"id": source["url"]})
             if database["metadata"]["type"] != "database":
                 raise PermissionError("Cannot verify owning database")
             self._check_path(database_path(database), database["title"])
             sources, views = database_members(database)
             # Multiple/linked sources need an ownership contract not supplied by fetch.
-            if sources != {source_id} or (kind == "view" and object_id(arguments["id"]) not in views):
+            if sources != {source_id} or (kind == "view" and object_id(id) not in views):
                 raise PermissionError("Cannot verify data source or view membership")
         else:
             raise PermissionError("Unsupported fetch entity type")
-        return result, entity, is_root
-
-    async def _fetch_entity(self, arguments):
-        result = await self.call("notion-fetch", arguments)
-        if result.is_error:
-            raise PermissionError("Fetch target could not be verified")
-        try:
-            entity = json.loads(result.content[0].text)
-            entity["metadata"]["type"]
-        except (ValueError, KeyError, IndexError, AttributeError, TypeError) as error:
-            raise PermissionError("Unrecognized fetch response") from error
-        return result, entity
+        return is_root
 
     def _check_path(self, ancestors, title):
         root = self.root_path

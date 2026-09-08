@@ -13,7 +13,8 @@ server.py                 MCP 요청 파싱 / 함수 선택 / MCP 응답
   → functions[name](**arguments)
 tool_functions.py         42개 명시적 Python 메서드 / 도구별 정책 적용
   → tool_runtime.py       도구 등록 / JSON Schema 검사 / 공통 호출
-  → permissions.py        내부 fetch / 공통 소속 검사 / 부모·대상 검사
+  → permissions.py        공통 소속 검사 / 부모·대상 검사
+  → entity_lookup.py      내부 fetch / 객체 응답 파싱
   → tool_runtime.call(name, arguments)
 upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응답 수신
   → https://mcp.notion.com/mcp
@@ -77,7 +78,9 @@ root_path = ["홈", "test"]
 
 모든 쓰기는 스키마 검증 → 공통 소속 검사 → 도구별 제한 → 원격 요청 순서로 실행한다.
 쓰기 도구가 `NotionTools.fetch()`를 호출하지 않는다. `permissions.py`의 같은 객체 검사 로직을 사용하며,
-내부 조회에만 원격 `notion-fetch`를 사용한다. 조회용 `self`·문서 URI 예외는 쓰기에 적용되지 않는다.
+내부 조회와 응답 파싱은 `entity_lookup.py`를 공유한다. `fetch()`는 예외 처리·조회·검사 요청·결과 반환을
+직접 수행한다. 이미 조회한 객체를 `Permissions.check_entity()`에 전달하므로 해당 객체를 다시 조회하지 않는다.
+데이터 소스·뷰의 소속 판정에 필요한 추가 객체만 권한 계층에서 조회한다. 조회용 `self`·문서 URI 예외는 쓰기에 적용되지 않는다.
 
 | 도구 | 검사 및 제한 |
 |---|---|
@@ -240,7 +243,7 @@ asyncio.run(main())
 
 `tool_functions.py`는 MCP 서버나 HTTP 프레임워크를 import하지 않는다.
 `tool_functions.py`에는 초기화 연결, 도구별 명시적 메서드와 `TOOL_METHODS` 목록이 있다.
-도구 등록·스키마 검증·공통 전송은 `tool_runtime.py`, 조회·소속 판정·응답 파싱은 `permissions.py`에 모았다.
+도구 등록·스키마 검증·공통 전송은 `tool_runtime.py`, 소속 판정은 `permissions.py`, 내부 조회·객체 응답 파싱은 `entity_lookup.py`에 둔다.
 기존 `fetch_permissions.py`는 `permissions.py`로 통합했다.
 MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검사를 거친다.
 `runtime.call()`은 내부 전송용이며 페이지 권한 검사를 자체 수행하지 않는다. 외부 호출자는 항상 도구 메서드를 사용한다.

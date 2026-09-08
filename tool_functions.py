@@ -1,3 +1,6 @@
+from urllib.parse import urlsplit
+
+from entity_lookup import fetch_entity
 from tool_runtime import UNSET, ToolRuntime
 
 
@@ -61,7 +64,13 @@ class NotionTools:
             "include_transcript": include_transcript,
             "include_discussions": include_discussions,
         })
-        return await self.runtime.permissions.fetch(arguments)
+        uri = urlsplit(id)
+        if id == "self" or (uri.scheme == "notion" and uri.netloc == "docs" and uri.path.startswith("/")):
+            return await self.runtime.call("notion-fetch", arguments)
+        self.runtime.permissions.require_root()
+        result, entity = await fetch_entity(self.runtime.call, arguments)
+        await self.runtime.permissions.check_entity(id, entity)
+        return result
 
     async def create_attachment(
         self, *,
