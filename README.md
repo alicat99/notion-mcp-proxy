@@ -1,6 +1,6 @@
 # Notion MCP Proxy
 
-Notion MCP Proxy는 **공식 Notion MCP를 한 번 감싸서, 지정한 단일 루트 페이지와 그 하위 페이지로 조회·편집 권한을 제한하는 MCP 서버**다. 클라이언트 요청을 Python 도구 함수로 받아 권한을 검사한 뒤 공식 Notion MCP에 전달한다.
+Notion MCP Proxy는 **공식 Notion MCP 서버와 클라이언트 사이에서 페이지 계층 기반 접근 제어를 수행하는 MCP 프록시 서버**다. 지정한 단일 루트 페이지와 그 하위 트리를 접근 허용 범위로 설정하고, 수신한 도구 호출을 Python 함수에 매핑하여 권한 정책을 검증한 후 업스트림 Notion MCP 서버로 전달한다.
 
 ```text
 Codex 등 MCP 클라이언트 → Notion MCP Proxy → 공식 Notion MCP
@@ -19,7 +19,7 @@ cd notion-mcp-proxy
 uv sync --frozen
 ```
 
-공식 MCP Python SDK는 `vendor/python-sdk/`에 포함되어 있어 별도 클론은 필요 없다.
+[공식 MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)는 `vendor/python-sdk/`에 포함되어 있어 별도 클론은 필요 없다.
 
 ### 허용 루트 설정과 전자서명
 
@@ -27,7 +27,13 @@ uv sync --frozen
 
 ```toml
 [fetch]
+# Notion 페이지 제목을 최상위 페이지부터 허용 루트까지 순서대로 나열한 경로다.
+# ["홈", "test"]는 최상위 "홈" 페이지 아래의 "test" 페이지를 허용 루트로 지정한다.
+# "test" 자체와 그 하위 페이지만 허용하며, "홈"이나 "test"의 형제 페이지는 허용하지 않는다.
+# 파일 시스템 경로나 독립적으로 허용할 페이지 목록이 아니다. 빈 배열은 객체 접근을 거부한다.
 root_path = ["홈", "test"]
+
+# root_path의 마지막 페이지(이 예에서는 "test")의 UUID다. 검색마다 경로와 대조한다.
 root_id = "허용 루트 페이지의 실제 UUID"
 ```
 
@@ -47,7 +53,7 @@ uv run --frozen python -m notion_proxy.sign_permissions
 | `config/permissions.sig` | 승인한 설정의 서명. Git에 포함 |
 | `.private/permissions-private.pem` | 설정 변경 시 사용하는 개인키. Git 제외 |
 
-서버 실행에는 개인키가 필요 없다. **폴더를 직접 복사할 때는 `.private/`를 제외한다. `.gitignore`는 파일 복사를 막지 않는다.** 개인키는 별도로 백업한다. `sign_permissions --init`은 키가 없는 새 환경에서만 사용하며 기존 키를 덮어쓰지 않는다. 기존 공개키가 포함된 복제본에서는 관리자가 서명한 설정을 배포받는다.
+`sign_permissions --init`은 키가 없는 새 환경에서만 사용하며 기존 키를 덮어쓰지 않는다. 기존 공개키가 포함된 복제본에서는 관리자가 서명한 설정을 배포받는다.
 
 ### 실행과 Notion 인증
 

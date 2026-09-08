@@ -1,6 +1,9 @@
 [fetch]
-# Absolute title path, for example ["홈", "test"]. Empty denies entity fetches.
+# Notion 페이지 제목을 최상위 페이지부터 허용 루트까지 순서대로 나열한 경로다.
+# ["홈", "test"]는 최상위 "홈" 페이지 아래의 "test" 페이지를 허용 루트로 지정한다.
+# "test" 자체와 그 하위 페이지만 허용하며, "홈"이나 "test"의 형제 페이지는 허용하지 않는다.
+# 파일 시스템 경로나 독립적으로 허용할 페이지 목록이 아니다. 빈 배열은 객체 접근을 거부한다.
 root_path = ["홈", "test"]
 
-# Search scope; verified against root_path on every search.
+# root_path의 마지막 페이지(이 예에서는 "test")의 UUID다. 검색마다 경로와 대조한다.
 root_id = "3d53192c101b801bbfaafa7c74b40cac"
