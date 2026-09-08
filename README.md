@@ -7,7 +7,7 @@ Notion MCP의 클라이언트이면서 로컬 MCP 서버로 동작하는 Python 
 노출되는 12개 도구 중 10개는 아래 권한 검사를 적용하고, 업로드 생성 2개는 명시적으로 항상 허용한다. 합의한 예외와 지원 범위는 아래에 정리했다.
 
 ```text
-notion_proxy/client.py
+examples/client.py
   → tools/call {name, arguments}
 notion_proxy/server.py                 MCP 요청 파싱 / 함수 선택 / MCP 응답
   → functions[name](**arguments)
@@ -38,11 +38,11 @@ notion_proxy/upstream.py               SDK 연결 / 공통 tools/call 조립 / �
 ## 폴더 구조
 
 ```text
-notion_proxy/   서버·클라이언트·권한 검사·OAuth·서명 CLI Python 패키지
+notion_proxy/   서버·권한 검사·OAuth·서명 CLI Python 패키지
 config/         서명된 설정, 공개키, 서명
 .private/       개인키 (Git 제외, 배포 시 제외)
 docs/          원본 Notion 도구 스키마
-examples/      호출 인자와 Codex 연결 설정 예시
+examples/      참고용 클라이언트·호출 인자·Codex 연결 설정 예시
 tests/         자동 테스트와 실제 서버 검사 스크립트
 reports/       실제 서버 검사 결과
 vendor/        공식 MCP Python SDK
@@ -253,29 +253,11 @@ uv run --frozen python -X utf8 -m notion_proxy.server
 종료는 Ctrl+C. 로컬 포트를 바꾸려면 `--port 6379`을 추가한다.
 
 OAuth·keyring은 서버 프로세스에만 있다. 최소 클라이언트에서는 로그인하지 않는다.
-기존 `notion_proxy/client.py --oauth` 방식은 제거했다.
 
-## 최소 클라이언트: 터미널 B
+## 참고용 클라이언트
 
-전체 도구 목록과 입력 스키마:
-
-```powershell
-uv run --frozen python -X utf8 -m notion_proxy.client
-```
-
-연결 정보 읽기:
-
-```powershell
-uv run --frozen python -X utf8 -m notion_proxy.client --tool notion-fetch --args-file examples/notion-self.json
-```
-
-다른 포트의 브릿지에 연결:
-
-```powershell
-uv run --frozen python -X utf8 -m notion_proxy.client --url http://127.0.0.1:6379/mcp
-```
-
-`-X utf8`은 Windows 한국어 입출력을 위한 옵션이다.
+[examples/client.py](examples/client.py)는 서버 구현·자동 테스트와 독립된 사용 예제다.
+실행 명령과 도구 호출 방법은 파일 상단 주석에 정리했다.
 
 ## 다른 프로젝트의 Codex에서 연결
 
@@ -298,36 +280,6 @@ Codex와 브릿지는 같은 컴퓨터에서 실행해야 한다. 원격 환경�
 여러 프로젝트가 같은 서버 URL을 사용할 수 있으며, 모두 동일한 Notion 연결과 현재 권한을 공유한다.
 
 설정 형식 참고: [OpenAI 공식 MCP 연결 문서](https://developers.openai.com/codex/mcp).
-
-## 원하는 도구 호출
-
-1. 목록의 `tools[].name`, `description`, `inputSchema`를 확인한다.
-2. 입력 스키마에 맞는 JSON 객체를 파일로 작성한다.
-3. 그 이름과 파일을 지정한다. 인자가 없으면 `--args-file`을 생략한다.
-
-```powershell
-uv run --frozen python -X utf8 -m notion_proxy.client --tool notion-fetch --args-file examples/notion-page.json
-```
-
-`examples/notion-page.json`의 페이지 ID를 실제 값으로 수정한 뒤 실행한다.
-도구 이름은 서버가 실제로 반환한 값을 사용한다. 쓰기 도구도 같은 방법으로 호출하며 실제 Notion에 반영된다.
-입력은 UTF-8/BOM JSON을 지원한다. 중첩 객체, 배열, false, null을 그대로 전달한다.
-
-여러 도구를 같은 연결에서 연속 호출하려면 `notion_proxy/client.py`의 `# Additional calls` 부분을 수정한다.
-
-```python
-result = await client.call_tool("notion-fetch", {"id": "self"})
-print(result.model_dump_json(indent=2, by_alias=True))
-
-result = await client.call_tool("실제 도구 이름", {"실제 인자": "값"})
-print(result.model_dump_json(indent=2, by_alias=True))
-```
-
-MCP 결과는 `content`, `structuredContent`, `isError` 등을 포함한다.
-텍스트·이미지 등 콘텐츠 블록을 임의로 문자열화하거나 JSON으로 재해석하지 않고 SDK 결과를 반환한다.
-`isError: true`인 도구 결과는 그대로 출력되며 CLI의 종료 코드와는 별개다.
-알 수 없는 도구·입력 스키마 위반은 MCP `INVALID_PARAMS`로 거부한다.
-네트워크 오류나 상위 MCP 오류를 숨기거나 쓰기 요청을 임의로 반복 실행하지 않는다.
 
 ## MCP 없이 Python 래퍼 직접 호출
 
@@ -469,7 +421,7 @@ uv run --frozen python -X utf8 -m unittest discover -s tests -v
 
 테스트는 실제 HTTP 포트에 가짜 상위 MCP와 브릿지를 실행한다. 도구 목록 페이지네이션,
 스키마 보존, 중첩 인자, 한글·이미지·구조화 결과, 오류 결과, 잘못된 요청 차단,
-Python 래퍼 직접 호출과 최소 CLI 프로세스 실행을 검증한다. 42개 스키마와 명시적 메서드의 일치,
+Python 래퍼 직접 호출과 SDK 클라이언트의 HTTP 요청·응답을 검증한다. 예제 CLI는 테스트에서 실행하지 않는다. 42개 스키마와 명시적 메서드의 일치,
 선택 인자의 생략/null/false 구분, 새 도구·변경된 인자 감지도 검증한다. Notion 계정이나 OAuth 승인은 필요 없다.
 실제 Notion과의 OAuth·도구 호출은 별도 로그인 후 확인해야 한다.
 

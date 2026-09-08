@@ -3,7 +3,6 @@ import base64
 import json
 import inspect
 import socket
-import sys
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -158,21 +157,6 @@ async def check_bridge():
             with patch("notion_proxy.permissions.load_config", return_value={"fetch": {"root_path": ["홈", "test"]}}):
                 bridge = create_bridge(discovered, upstream)
             async with serve_http(bridge) as bridge_url:
-                process = await asyncio.create_subprocess_exec(
-                    sys.executable, "-X", "utf8", "-m", "notion_proxy.client", "--url", bridge_url,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
-                assert process.returncode == 0, stderr.decode("utf-8")
-                assert len(json.loads(stdout)["tools"]) == 3
-                process = await asyncio.create_subprocess_exec(
-                    sys.executable, "-X", "utf8", "-m", "notion_proxy.client", "--url", bridge_url,
-                    "--tool", "notion-create-attachment",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
-                assert process.returncode == 0, stderr.decode("utf-8")
-                assert json.loads(stdout)["isError"] is True
                 async with Client(bridge_url) as client:
                     exposed = await client.list_tools()
                     assert exposed.tools == [tool for tool in discovered if tool.name not in BLOCKED_TOOLS]
