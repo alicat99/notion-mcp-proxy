@@ -1,4 +1,10 @@
 import inspect
+import json
+import tomllib
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from fetch_permissions import database_path, database_members, view_source, object_id
 
 from jsonschema import validators
 
@@ -23,6 +29,8 @@ class NotionTools:
 
     def __init__(self, upstream, tools):
         self.upstream = upstream
+        config = tomllib.loads(Path(__file__).with_name("permissions.toml").read_text(encoding="utf-8"))
+        self.allowed_root = tuple(config["fetch"]["root_path"])
         self.functions = {}
         self.validators = {}
         for tool in tools:
@@ -87,11 +95,69 @@ class NotionTools:
 
     async def fetch(self, *, id, include_transcript=UNSET, include_discussions=UNSET):
         """페이지·데이터베이스·데이터 소스·뷰 또는 self 정보를 읽는다."""
-        return await self._call("notion-fetch", {
+        arguments = {
             "id": id,
             "include_transcript": include_transcript,
             "include_discussions": include_discussions,
-        })
+        }
+        arguments = {key: value for key, value in arguments.items() if value is not UNSET}
+        self.validators["notion-fetch"].validate(arguments)
+        uri = urlsplit(id)
+        if id == "self" or (uri.scheme == "notion" and uri.netloc == "docs" and uri.path.startswith("/")):
+            return await self._call("notion-fetch", arguments)
+        if not self.allowed_root:
+            raise PermissionError("Fetch root is not configured")
+        result, entity = await self._fetch_entity(arguments)
+        kind = entity["metadata"]["type"]
+        if kind == "page":
+            # path excludes the page itself; use ancestry to recognize the root.
+            if "path" in entity:
+                path = tuple(entity["path"].split(" / "))
+            else:
+                path = database_path(entity)
+            self._check_path(path, entity["title"])
+        elif kind == "database":
+            self._check_path(database_path(entity), entity["title"])
+        elif kind in {"data_source", "view"}:
+            source = entity
+            source_id = object_id(id)
+            if kind == "view":
+                source_url = view_source(entity)
+                source_id = object_id(source_url)
+                _, source = await self._fetch_entity({"id": source_url})
+            if source["metadata"]["type"] != "data_source":
+                raise PermissionError("Cannot verify data source")
+            _, database = await self._fetch_entity({"id": source["url"]})
+            if database["metadata"]["type"] != "database":
+                raise PermissionError("Cannot verify owning database")
+            self._check_path(database_path(database), database["title"])
+            sources, views = database_members(database)
+            # Multiple/linked sources need an ownership contract not supplied by fetch.
+            if sources != {source_id} or (kind == "view" and object_id(id) not in views):
+                raise PermissionError("Cannot verify data source or view membership")
+        else:
+            raise PermissionError("Unsupported fetch entity type")
+        return result
+
+    #region Fetch permissions
+
+    async def _fetch_entity(self, arguments):
+        result = await self._call("notion-fetch", arguments)
+        if result.is_error:
+            raise PermissionError("Fetch target could not be verified")
+        try:
+            entity = json.loads(result.content[0].text)
+            entity["metadata"]["type"]
+        except (ValueError, KeyError, IndexError, AttributeError, TypeError) as error:
+            raise PermissionError("Unrecognized fetch response") from error
+        return result, entity
+
+    def _check_path(self, ancestors, title):
+        root = self.allowed_root
+        if ancestors[:len(root)] != root and ancestors + (title,) != root:
+            raise PermissionError("Fetch target is outside the allowed root")
+
+    #endregion
 
     async def create_attachment(
         self, *,

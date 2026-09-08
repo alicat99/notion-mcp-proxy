@@ -1,0 +1,3 @@
+[fetch]
+# Absolute title path, for example ["홈", "test"]. Empty denies entity fetches.
+root_path = []
