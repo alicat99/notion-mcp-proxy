@@ -4,6 +4,18 @@ from jsonschema import validators
 
 
 UNSET = object()
+BLOCKED_TOOLS = frozenset({
+    "notion-search-agents",
+    "notion-search-sessions",
+    "notion-query-sessions",
+    "notion-spawn-session",
+    "notion-get-session-status",
+    "notion-wait-session",
+    "notion-stop-session",
+    "notion-send-message-to-session",
+    "notion-list-session-events",
+    "notion-read-session-event",
+})
 
 
 class NotionTools:
@@ -14,6 +26,8 @@ class NotionTools:
         self.functions = {}
         self.validators = {}
         for tool in tools:
+            if tool.name in BLOCKED_TOOLS:
+                continue
             if tool.name not in TOOL_METHODS:
                 raise ValueError(f"Add an explicit wrapper for new tool: {tool.name}")
             function = getattr(self, TOOL_METHODS[tool.name])
@@ -468,6 +482,8 @@ class NotionTools:
     #endregion
 
     async def _call(self, name, arguments):
+        if name in BLOCKED_TOOLS:
+            raise PermissionError(f"Tool access denied: {name}")
         arguments = {key: value for key, value in arguments.items() if value is not UNSET}
         self.validators[name].validate(arguments)
         # Shared permission checks can be added here before transmission.

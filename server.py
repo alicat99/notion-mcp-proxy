@@ -8,7 +8,7 @@ from mcp.server import Server
 from mcp.shared.exceptions import MCPError
 from mcp.types import INVALID_PARAMS, ListToolsResult
 
-from tool_functions import NotionTools
+from tool_functions import BLOCKED_TOOLS, NotionTools
 from upstream import connect_upstream
 
 
@@ -23,7 +23,8 @@ async def main():
         tools = await upstream.list_tools()
         bridge = create_bridge(tools, upstream)
         app = bridge.streamable_http_app()
-        print(f"Loaded {len(tools)} tools. Bridge: http://127.0.0.1:{options.port}/mcp")
+        print(f"Loaded {sum(tool.name not in BLOCKED_TOOLS for tool in tools)} tools. "
+              f"Bridge: http://127.0.0.1:{options.port}/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=options.port)
         await uvicorn.Server(config).serve()
 
@@ -32,9 +33,11 @@ def create_bridge(tools, upstream):
     functions = NotionTools(upstream, tools).functions
 
     async def list_tools(ctx, params):
-        return ListToolsResult(tools=tools)
+        return ListToolsResult(tools=[tool for tool in tools if tool.name in functions])
 
     async def call_tool(ctx, params):
+        if params.name in BLOCKED_TOOLS:
+            raise MCPError(-32003, "Agent and session tools are disabled")
         if params.name not in functions:
             raise MCPError(INVALID_PARAMS, "Unknown tool")
         arguments = params.arguments or {}
@@ -44,6 +47,8 @@ def create_bridge(tools, upstream):
             raise MCPError(INVALID_PARAMS, "Invalid tool arguments") from error
         try:
             return await functions[params.name](**arguments)
+        except PermissionError as error:
+            raise MCPError(-32003, str(error)) from error
         except ValidationError as error:
             path = ".".join(str(part) for part in error.absolute_path) or "arguments"
             raise MCPError(INVALID_PARAMS, f"Invalid tool arguments at {path}") from error

@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import inspect
 import socket
 import sys
 import unittest
@@ -22,7 +23,7 @@ from mcp.types import (
 )
 
 from server import create_bridge
-from tool_functions import NotionTools, TOOL_METHODS
+from tool_functions import BLOCKED_TOOLS, NotionTools, TOOL_METHODS
 from upstream import connect_upstream
 
 
@@ -31,8 +32,22 @@ class BridgeTests(unittest.TestCase):
         snapshot = Path(__file__).resolve().parents[1] / "notion_tools.json"
         tools = [Tool.model_validate(item) for item in json.loads(snapshot.read_text(encoding="utf-8"))]
         wrapper = NotionTools(AsyncMock(), tools)
-        self.assertEqual(set(wrapper.functions), set(TOOL_METHODS))
+        self.assertEqual(set(wrapper.functions), set(TOOL_METHODS) - BLOCKED_TOOLS)
         self.assertEqual(len(set(TOOL_METHODS.values())), len(tools))
+
+    def test_all_agent_methods_deny_direct_python_calls(self):
+        upstream = AsyncMock()
+        wrapper = NotionTools(upstream, [])
+        for name in BLOCKED_TOOLS:
+            method = getattr(wrapper, TOOL_METHODS[name])
+            arguments = {
+                key: "blocked"
+                for key, value in inspect.signature(method).parameters.items()
+                if value.default is inspect.Parameter.empty
+            }
+            with self.subTest(tool=name), self.assertRaises(PermissionError):
+                asyncio.run(method(**arguments))
+        upstream.call_tool.assert_not_awaited()
 
     def test_optional_arguments_preserve_omission_null_and_false(self):
         schema = {
@@ -82,6 +97,7 @@ async def check_bridge():
             },
         ),
         Tool(name="notion-check-mcp-next-steps", input_schema={"type": "object"}),
+        Tool(name="notion-stop-session", input_schema={"type": "object"}),
     ]
 
     async def list_tools(ctx, params):
@@ -128,7 +144,7 @@ async def check_bridge():
                 assert json.loads(stdout)["isError"] is True
                 async with Client(bridge_url) as client:
                     exposed = await client.list_tools()
-                    assert exposed.tools == discovered
+                    assert exposed.tools == [tool for tool in discovered if tool.name not in BLOCKED_TOOLS]
                     arguments = {
                         "pages": [{"title": "테스트", "properties": {"tags": [1, False, None]}}],
                         "allow_async": False,
@@ -143,6 +159,13 @@ async def check_bridge():
                     assert error.is_error
                     assert error.content[0].text == "upstream tool failure"
                     before = len(calls)
+                    for name in BLOCKED_TOOLS:
+                        try:
+                            await client.call_tool(name, {})
+                        except MCPError as error:
+                            assert error.code == -32003
+                        else:
+                            raise AssertionError("Blocked tool was accepted")
                     for name, arguments in [(tools[0].name, {"allow_async": "invalid"}), ("unknown", {})]:
                         try:
                             await client.call_tool(name, arguments)
