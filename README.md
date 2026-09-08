@@ -3,7 +3,7 @@
 Notion MCP의 클라이언트이면서 로컬 MCP 서버로 동작하는 Python 브릿지다.
 시작할 때 원격 도구 목록의 모든 페이지를 읽어 미리 작성된 Python 메서드에 연결하고,
 같은 이름·설명·입력 스키마·출력 스키마를 로컬 MCP 클라이언트에 제공한다.
-`notion-fetch`, `notion-create-pages`, `notion-update-page`, `notion-move-pages`에 공통 루트 경로 기반 권한 검사를 적용한다. 에이전트·세션 관련 10개 도구는 접근을 거부한다.
+`notion-fetch`, `notion-create-pages`, `notion-update-page`, `notion-move-pages`에 공통 루트 경로 기반 권한 검사를 적용한다. 검색·DB 생성/수정·페이지 복제에도 아래 정책을 적용한다. 총 17개 도구는 목록에서 제외하고 접근을 거부한다.
 나머지 검색·조회·수정 도구에는 아직 페이지 권한 검사가 없으므로 서버 전체의 접근 제한으로 간주하면 안 된다.
 
 ```text
@@ -115,9 +115,44 @@ root_path = ["홈", "test"]
 - `allow_async` 등 실행 옵션은 원래 값으로 전달한다. 검사 후 실행 시점까지의 동시 이동·변경을 원자적으로 막지는 못한다.
 - 검사 실패 시 쓰기 요청을 보내지 않는다. Notion에 전달된 작업 자체의 원자성이나 실패 시 롤백을 보장하는 것은 아니다.
 
-검증: 자동 테스트 22개 통과. HTTP 브릿지의 권한 거부 응답, 일반 페이지·DB·데이터 소스 부모,
+검증: 자동 테스트 26개 통과. HTTP 브릿지의 권한 거부 응답, 일반 페이지·DB·데이터 소스 부모,
 행 수정, 루트 보호, 외부 대상·복합 이동 거부, 템플릿·삭제 옵션 전달을 가짜 상위 서버로 검증한다.
 이번 쓰기 권한 구현에서 실제 Notion 데이터 생성·수정·이동은 실행하지 않았다.
+
+## 검색·DB·복제 정책
+
+핵심 검사는 `permissions.py`, 도구별 검증→검사→전달 흐름은 `tool_functions.py`에 있다.
+기존 루트 경로 설정을 유지하고 검색에 필요한 ID를 `permissions.toml`에 추가했다.
+
+```toml
+[fetch]
+root_path = ["홈", "test"]
+root_id = "3d53192c101b801bbfaafa7c74b40cac"
+```
+
+`root_id`는 현재 테스트 루트의 ID다. 다른 루트를 사용하려면 두 값을 함께 변경하고 서버를 재시작한다.
+검색 때마다 이 ID가 실제 루트 경로에 해당하는 페이지인지 확인한다. ID나 루트 경로 미설정·불일치는 거부한다.
+
+| 도구 | 적용 정책 |
+|---|---|
+| `notion-search` | `page_url`을 루트 ID로 덮어쓴다. 사용자 검색과 추가 범위 지정(`data_source_url`, `teamspace_id`, `filters.teamspace_ids`)은 거부한다. 그 외 검색 조건은 유지한다. |
+| `notion-create-database` | 명시적인 내부 페이지 부모 필수. 직접 작성한 비관계형 `schema`만 허용하며 `database_type`은 거부한다. |
+| `notion-update-data-source` | 내부 단일 소스 DB의 소속 검사. DB ID 입력도 실제 `collection://` ID로 변환해 전송한다. 기존 관계형·롤업·알 수 없는 타입·readOnly 속성이 있으면 수정 거부. |
+| `notion-duplicate-page` | 내부 일반 페이지·DB 행만 허용. 루트 자체와 DB 객체는 거부한다. |
+
+검색 결과별 경로 필터는 적용하지 않는다. Notion의 페이지 및 하위 검색 범위 제한을 신뢰하는 정책이다.
+DB 스키마는 전체 DDL 구문을 허용 문법과 대조한다. 관계형·롤업, SQL 주석, 미지원 구문은 거부한다.
+기본 속성, SELECT/MULTI_SELECT, NUMBER FORMAT, FORMULA, UNIQUE_ID PREFIX와 열 설명을 지원한다.
+변경문은 ADD/DROP/RENAME COLUMN, ALTER COLUMN SET을 지원한다. 여러 변경문은 세미콜론으로 구분한다.
+외부 연결 및 다중 소스 DB는 지원 범위 밖이다. `is_inline` 변경은 거부한다.
+내부 데이터 소스의 제목·설명 변경과 `in_trash`는 허용한다. 열 삭제·타입 변경·휴지통 이동은 기존 데이터를 잃게 할 수 있다.
+
+복제는 실제 테스트에서 같은 부모 아래 생성되는 동작을 기준으로 원본 위치를 검사한다.
+하위 콘텐츠 및 관계형 데이터의 복제 부작용은 별도 검사하지 않으므로 관계형 DB를 사용하지 않는 전제다.
+기존 create-pages/update-page의 템플릿·관계형 속성 전달 정책은 이번 변경에 포함하지 않는다.
+댓글 도구를 차단해도 허용된 fetch의 include_discussions 옵션까지 차단하는 것은 아니다.
+
+검증은 가짜 상위 서버의 HTTP 테스트와 Python 권한 테스트로 수행했다. 이번 변경에서 실제 Notion 쓰기는 실행하지 않았다.
 
 ## 설치
 
@@ -260,10 +295,17 @@ MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검�
 실시간 스키마의 최상위 인자 이름과 메서드 시그니처가 달라진 경우에도 수정할 도구를 알려준다.
 이는 중간 브릿지와 코드상의 도구 목록이 서로 달라진 채 동작하는 것을 방지한다.
 
-## 에이전트·세션 도구 차단
+## 미지원 도구 차단
 
-`tool_runtime.py`의 `BLOCKED_TOOLS`에 다음 10개를 명시했다.
+`tool_runtime.py`의 `BLOCKED_TOOLS`에 다음 17개를 명시했다.
 
+- `notion-convert-page-to-skill`
+- `notion-ai-search`
+- `notion-search-skills`
+- `notion-create-folder`
+- `notion-update-folder`
+- `notion-create-comment`
+- `notion-get-comments`
 - `notion-search-agents`
 - `notion-search-sessions`
 - `notion-query-sessions`
@@ -277,9 +319,9 @@ MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검�
 
 이 도구들은 tools/list에서 제외된다. 이름을 알고 tools/call로 호출해도 MCP 오류 `-32003`으로 거부한다.
 Python 메서드는 기능 목록으로 남기되 직접 호출하면 `PermissionError`를 발생시키며 상위 Notion으로 전달하지 않는다.
-원본 42개 도구가 그대로 노출되는 환경에서는 브릿지가 32개를 제공한다.
+원본 42개 도구가 그대로 노출되는 환경에서는 브릿지가 25개를 제공한다.
 변경 적용에는 서버 재시작과 클라이언트의 도구 목록 갱신이 필요하다.
-Skill 페이지 지정·검색과 회의록 조회는 에이전트 세션 실행 기능이 아니므로 이번 차단에는 포함하지 않는다.
+회의록 조회는 이번 차단에 포함하지 않는다. 원본 notion_tools.json은 상위 서버의 참고 스냅샷이므로 차단 도구도 보존한다.
 
 ## 연결과 지원 범위
 
