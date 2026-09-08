@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from signed_config import generate_keys, load_config, sign_config
+from notion_proxy.signed_config import generate_keys, load_config, sign_config
 
 
 class SignedConfigTests(unittest.TestCase):
@@ -13,8 +13,8 @@ class SignedConfigTests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         self.config = self.directory / "permissions.toml"
         self.config.write_bytes('[fetch]\nroot_path = ["홈", "test"]\n'.encode("utf-8"))
-        generate_keys(self.directory)
-        sign_config(self.directory)
+        generate_keys(self.directory, self.directory / ".private")
+        sign_config(self.directory, self.directory / ".private")
 
     def test_copy_without_private_key_verifies(self):
         destination = self.directory / "copy"
@@ -30,7 +30,7 @@ class SignedConfigTests(unittest.TestCase):
                 self.config.write_bytes(changed)
                 with self.assertRaises(PermissionError):
                     load_config(self.directory)
-        sign_config(self.directory)
+        sign_config(self.directory, self.directory / ".private")
         self.assertEqual(load_config(self.directory)["fetch"]["root_path"], ["홈", "test"])
 
     def test_missing_signature_or_public_key_fails(self):
@@ -45,15 +45,15 @@ class SignedConfigTests(unittest.TestCase):
     def test_different_signing_key_rejected(self):
         other = self.directory / "other"
         other.mkdir()
-        generate_keys(other)
+        generate_keys(other, other / ".private")
         shutil.copyfile(other / ".private" / "permissions-private.pem", self.directory / ".private" / "permissions-private.pem")
         with self.assertRaises(ValueError):
-            sign_config(self.directory)
+            sign_config(self.directory, self.directory / ".private")
         shutil.copyfile(other / "permissions-public.pem", self.directory / "permissions-public.pem")
         with self.assertRaises(PermissionError):
             load_config(self.directory)
 
     def test_key_generation_does_not_overwrite_keys(self):
         with self.assertRaises(FileExistsError):
-            generate_keys(self.directory)
+            generate_keys(self.directory, self.directory / ".private")
         load_config(self.directory)

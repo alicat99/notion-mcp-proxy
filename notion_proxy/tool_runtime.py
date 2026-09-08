@@ -4,7 +4,7 @@ import inspect
 
 from jsonschema import validators
 
-from permissions import Permissions
+from .permissions import Permissions
 
 
 UNSET = object()

@@ -7,21 +7,21 @@ Notion MCP의 클라이언트이면서 로컬 MCP 서버로 동작하는 Python 
 노출되는 12개 도구 중 10개는 아래 권한 검사를 적용하고, 업로드 생성 2개는 명시적으로 항상 허용한다. 합의한 예외와 지원 범위는 아래에 정리했다.
 
 ```text
-client.py
+notion_proxy/client.py
   → tools/call {name, arguments}
-server.py                 MCP 요청 파싱 / 함수 선택 / MCP 응답
+notion_proxy/server.py                 MCP 요청 파싱 / 함수 선택 / MCP 응답
   → functions[name](**arguments)
-tool_functions.py         42개 명시적 Python 메서드 / 도구별 정책 적용
-  → tool_runtime.py       도구 등록 / JSON Schema 검사 / 공통 호출
-  → permissions.py        공통 소속 검사 / 부모·대상 검사
-  → entity_lookup.py      내부 fetch / 객체 응답 파싱
+notion_proxy/tool_functions.py         42개 명시적 Python 메서드 / 도구별 정책 적용
+  → notion_proxy/tool_runtime.py       도구 등록 / JSON Schema 검사 / 공통 호출
+  → notion_proxy/permissions.py        공통 소속 검사 / 부모·대상 검사
+  → notion_proxy/entity_lookup.py      내부 fetch / 객체 응답 파싱
   → tool_runtime.call(name, arguments)
-upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응답 수신
+notion_proxy/upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응답 수신
   → https://mcp.notion.com/mcp
 ```
 
-도구별로 달라지는 것은 이름과 인자 JSON이다. 전송 형식은 공통이므로 `upstream.py`에 분리했다.
-`tool_functions.py`의 `NotionTools` 클래스에 42개 도구가 각각 `async def`로 존재한다.
+도구별로 달라지는 것은 이름과 인자 JSON이다. 전송 형식은 공통이므로 `notion_proxy/upstream.py`에 분리했다.
+`notion_proxy/tool_functions.py`의 `NotionTools` 클래스에 42개 도구가 각각 `async def`로 존재한다.
 `fetch`, `search`, `create_pages`, `update_page`처럼 이름·인자·설명을 코드에서 직접 확인하고 수정한다.
 필수 인자는 기본값 없이, 선택 인자는 `UNSET`으로 선언한다. 선택 인자를 생략하면 전송하지 않고,
 명시적으로 전달한 `None`, `False`, 빈 목록은 보존한다. 단, 실제 값은 서버 스키마 검증을 통과해야 한다.
@@ -31,13 +31,29 @@ upstream.py               SDK 연결 / 공통 tools/call 조립 / 전송 / 응�
 예: `notion-fetch` → `fetch`, `notion-create-pages` → `create_pages`.
 새 함수를 런타임에 생성하거나 인자 제한 없는 함수를 대신 노출하지 않는다.
 
-`notion_tools.json`에는 2026-09-08 실제 Notion MCP의 tools/list로 받은 42개 도구의 설명과 전체 스키마를 저장했다.
+`docs/notion_tools.json`에는 2026-09-08 실제 Notion MCP의 tools/list로 받은 42개 도구의 설명과 전체 스키마를 저장했다.
 도구 구현 시 참고하는 목록이며 런타임 권한·실행 가능 여부를 보장하지 않는다. 서버는 시작할 때 실시간 스키마를 사용한다.
 이번 조회에서는 원격 도구 메타데이터만 저장했으며 OAuth 자격 증명은 포함하지 않았다.
 
+## 폴더 구조
+
+```text
+notion_proxy/   서버·클라이언트·권한 검사·OAuth·서명 CLI Python 패키지
+config/         서명된 설정, 공개키, 서명
+.private/       개인키 (Git 제외, 배포 시 제외)
+docs/          원본 Notion 도구 스키마
+examples/      호출 인자와 Codex 연결 설정 예시
+tests/         자동 테스트와 실제 서버 검사 스크립트
+reports/       실제 서버 검사 결과
+vendor/        공식 MCP Python SDK
+```
+
+프로젝트 루트에서 `python -m notion_proxy.server`처럼 모듈로 실행한다.
+설정·키 경로는 코드 위치를 기준으로 찾는다. 기존 루트의 `server.py`, `client.py`, `sign_permissions.py`는 이동했으므로 이전 파일 실행 명령은 사용할 수 없다.
+
 ## 공통 허용 루트 설정
 
-프로젝트의 `permissions.toml`에서 절대 제목 경로를 배열로 지정한다. 기존 설정과 호환되도록 `[fetch]` 이름을 유지하지만, 권한이 적용된 도구들은 모두 같은 루트를 사용한다.
+프로젝트의 `config/permissions.toml`에서 절대 제목 경로를 배열로 지정한다. 기존 설정과 호환되도록 `[fetch]` 이름을 유지하지만, 권한이 적용된 도구들은 모두 같은 루트를 사용한다.
 
 ```toml
 [fetch]
@@ -76,46 +92,46 @@ root_path = ["홈", "test"]
 
 ## 설정 전자서명
 
-`permissions.toml` 전체 바이트를 Ed25519로 서명한다. 서버는 OAuth 연결 전에 서명을 검증하며,
+`config/permissions.toml` 전체 바이트를 Ed25519로 서명한다. 서버는 OAuth 연결 전에 서명을 검증하며,
 직접 Python 래퍼를 생성할 때도 검증한다. 파일·서명이 없거나 검증에 실패하면 시작을 중단한다.
 현재 설정의 키 생성과 서명은 완료되어 있다. 자동 재서명이나 검증 우회 옵션은 없다.
 
 | 파일 | 용도 | Git 포함 |
 |---|---|---|
-| `permissions.toml` | 승인된 설정 | 포함 |
-| `permissions.sig` | 설정 서명 | 포함 |
-| `permissions-public.pem` | 검증 공개키 | 포함 |
+| `config/permissions.toml` | 승인된 설정 | 포함 |
+| `config/permissions.sig` | 설정 서명 | 포함 |
+| `config/permissions-public.pem` | 검증 공개키 | 포함 |
 | `.private/permissions-private.pem` | 서명 개인키 | 제외 |
 
 설정 변경 후 승인한 내용에 다시 서명한다. 개인키가 있는 관리 컴퓨터에서 실행한다.
 
 ```powershell
-uv run --frozen python -X utf8 sign_permissions.py
+uv run --frozen python -X utf8 -m notion_proxy.sign_permissions
 ```
 
-설정과 새 `permissions.sig`를 함께 배포·커밋하고 서버를 재시작한다. 주석·공백·줄바꿈 변경도 재서명이 필요하다.
+설정과 새 `config/permissions.sig`를 함께 배포·커밋하고 서버를 재시작한다. 주석·공백·줄바꿈 변경도 재서명이 필요하다.
 `.gitattributes`는 설정의 줄바꿈 자동 변환을 막아 다른 OS에서도 서명한 바이트가 유지되도록 한다.
 
 다른 컴퓨터에는 저장소의 추적 파일만 복사하면 된다. 개인키 없이 다음 명령으로 검증할 수 있다.
 
 ```powershell
 uv sync --frozen
-uv run --frozen python -X utf8 sign_permissions.py --verify
-uv run --frozen python -X utf8 server.py
+uv run --frozen python -X utf8 -m notion_proxy.sign_permissions --verify
+uv run --frozen python -X utf8 -m notion_proxy.server
 ```
 
 **파일 탐색기로 폴더를 통째로 복사하면 `.gitignore`는 적용되지 않는다. 이 경우 `.private` 폴더는 직접 제외한다.**
 개인키는 별도로 백업한다. 이 파일은 암호 없이 저장되며 Git 제외가 파일 읽기 권한을 제한하는 것은 아니다.
 서명은 설정 변조를 탐지하며, 서버 코드·공개키 교체나 과거에 서명된 설정으로의 되돌리기까지 막지는 않는다.
 
-새 설치에서 키가 전혀 없을 때만 `sign_permissions.py --init`을 사용한다. 기존 개인키 또는 공개키가 있으면
+새 설치에서 키가 전혀 없을 때만 `python -m notion_proxy.sign_permissions --init`을 사용한다. 기존 개인키 또는 공개키가 있으면
 덮어쓰기를 거부한다. 배포 컴퓨터에서 새 키를 만들 필요는 없다.
 
 ## 페이지 생성·수정·이동 정책
 
 모든 쓰기는 스키마 검증 → 공통 소속 검사 → 도구별 제한 → 원격 요청 순서로 실행한다.
-쓰기 도구가 `NotionTools.fetch()`를 호출하지 않는다. `permissions.py`의 같은 객체 검사 로직을 사용하며,
-내부 조회와 응답 파싱은 `entity_lookup.py`를 공유한다. `fetch()`는 예외 처리·조회·검사 요청·결과 반환을
+쓰기 도구가 `NotionTools.fetch()`를 호출하지 않는다. `notion_proxy/permissions.py`의 같은 객체 검사 로직을 사용하며,
+내부 조회와 응답 파싱은 `notion_proxy/entity_lookup.py`를 공유한다. `fetch()`는 예외 처리·조회·검사 요청·결과 반환을
 직접 수행한다. 이미 조회한 객체를 `Permissions.check_entity()`에 전달하므로 해당 객체를 다시 조회하지 않는다.
 데이터 소스·뷰의 소속 판정에 필요한 추가 객체만 권한 계층에서 조회한다. 조회용 `self`·문서 URI 예외는 쓰기에 적용되지 않는다.
 
@@ -158,8 +174,8 @@ uv run --frozen python -X utf8 server.py
 
 ## 검색·DB·복제 정책
 
-핵심 검사는 `permissions.py`, 도구별 검증→검사→전달 흐름은 `tool_functions.py`에 있다.
-기존 루트 경로 설정을 유지하고 검색에 필요한 ID를 `permissions.toml`에 추가했다.
+핵심 검사는 `notion_proxy/permissions.py`, 도구별 검증→검사→전달 흐름은 `notion_proxy/tool_functions.py`에 있다.
+기존 루트 경로 설정을 유지하고 검색에 필요한 ID를 `config/permissions.toml`에 추가했다.
 
 ```toml
 [fetch]
@@ -221,7 +237,7 @@ uv sync --frozen
 ## 서버 실행: 터미널 A
 
 ```powershell
-uv run --frozen python -X utf8 server.py
+uv run --frozen python -X utf8 -m notion_proxy.server
 ```
 
 서버가 Notion OAuth 인증을 진행하고 도구를 조회한다. 저장된 인증이 유효하면 재사용한다.
@@ -237,26 +253,26 @@ uv run --frozen python -X utf8 server.py
 종료는 Ctrl+C. 로컬 포트를 바꾸려면 `--port 6379`을 추가한다.
 
 OAuth·keyring은 서버 프로세스에만 있다. 최소 클라이언트에서는 로그인하지 않는다.
-기존 `client.py --oauth` 방식은 제거했다.
+기존 `notion_proxy/client.py --oauth` 방식은 제거했다.
 
 ## 최소 클라이언트: 터미널 B
 
 전체 도구 목록과 입력 스키마:
 
 ```powershell
-uv run --frozen python -X utf8 client.py
+uv run --frozen python -X utf8 -m notion_proxy.client
 ```
 
 연결 정보 읽기:
 
 ```powershell
-uv run --frozen python -X utf8 client.py --tool notion-fetch --args-file examples/notion-self.json
+uv run --frozen python -X utf8 -m notion_proxy.client --tool notion-fetch --args-file examples/notion-self.json
 ```
 
 다른 포트의 브릿지에 연결:
 
 ```powershell
-uv run --frozen python -X utf8 client.py --url http://127.0.0.1:6379/mcp
+uv run --frozen python -X utf8 -m notion_proxy.client --url http://127.0.0.1:6379/mcp
 ```
 
 `-X utf8`은 Windows 한국어 입출력을 위한 옵션이다.
@@ -272,7 +288,7 @@ url = "http://127.0.0.1:6378/mcp"
 tool_timeout_sec = 120
 ```
 
-먼저 이 프로젝트에서 `uv run --frozen python -X utf8 server.py`를 실행하고 OAuth 및 도구 로딩을 완료한다.
+먼저 이 프로젝트에서 `uv run --frozen python -X utf8 -m notion_proxy.server`를 실행하고 OAuth 및 도구 로딩을 완료한다.
 그 다음 대상 프로젝트의 Codex를 다시 열어 연결한다. 이 URL 설정은 이미 실행 중인 서버에 연결하며,
 서버 프로세스를 자동으로 시작하지 않는다. 서버 터미널을 계속 실행해 두어야 한다.
 Notion OAuth는 브릿지가 담당하므로 이 설정에 Notion 토큰이나 OAuth 설정을 넣지 않는다.
@@ -290,14 +306,14 @@ Codex와 브릿지는 같은 컴퓨터에서 실행해야 한다. 원격 환경�
 3. 그 이름과 파일을 지정한다. 인자가 없으면 `--args-file`을 생략한다.
 
 ```powershell
-uv run --frozen python -X utf8 client.py --tool notion-fetch --args-file examples/notion-page.json
+uv run --frozen python -X utf8 -m notion_proxy.client --tool notion-fetch --args-file examples/notion-page.json
 ```
 
 `examples/notion-page.json`의 페이지 ID를 실제 값으로 수정한 뒤 실행한다.
 도구 이름은 서버가 실제로 반환한 값을 사용한다. 쓰기 도구도 같은 방법으로 호출하며 실제 Notion에 반영된다.
 입력은 UTF-8/BOM JSON을 지원한다. 중첩 객체, 배열, false, null을 그대로 전달한다.
 
-여러 도구를 같은 연결에서 연속 호출하려면 `client.py`의 `# Additional calls` 부분을 수정한다.
+여러 도구를 같은 연결에서 연속 호출하려면 `notion_proxy/client.py`의 `# Additional calls` 부분을 수정한다.
 
 ```python
 result = await client.call_tool("notion-fetch", {"id": "self"})
@@ -317,8 +333,8 @@ MCP 결과는 `content`, `structuredContent`, `isError` 등을 포함한다.
 
 ```python
 import asyncio
-from tool_functions import NotionTools
-from upstream import connect_upstream
+from notion_proxy.tool_functions import NotionTools
+from notion_proxy.upstream import connect_upstream
 
 async def main():
     async with connect_upstream("https://mcp.notion.com/mcp") as upstream:
@@ -329,10 +345,10 @@ async def main():
 asyncio.run(main())
 ```
 
-`tool_functions.py`는 MCP 서버나 HTTP 프레임워크를 import하지 않는다.
-`tool_functions.py`에는 초기화 연결, 도구별 명시적 메서드와 `TOOL_METHODS` 목록이 있다.
-도구 등록·스키마 검증·공통 전송은 `tool_runtime.py`, 소속 판정은 `permissions.py`, 내부 조회·객체 응답 파싱은 `entity_lookup.py`에 둔다.
-기존 `fetch_permissions.py`는 `permissions.py`로 통합했다.
+`notion_proxy/tool_functions.py`는 MCP 서버나 HTTP 프레임워크를 import하지 않는다.
+`notion_proxy/tool_functions.py`에는 초기화 연결, 도구별 명시적 메서드와 `TOOL_METHODS` 목록이 있다.
+도구 등록·스키마 검증·공통 전송은 `notion_proxy/tool_runtime.py`, 소속 판정은 `notion_proxy/permissions.py`, 내부 조회·객체 응답 파싱은 `notion_proxy/entity_lookup.py`에 둔다.
+기존 `fetch_permissions.py`는 `notion_proxy/permissions.py`로 통합했다.
 MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검사를 거친다.
 `runtime.call()`은 내부 전송용이며 페이지 권한 검사를 자체 수행하지 않는다. 외부 호출자는 항상 도구 메서드를 사용한다.
 
@@ -342,7 +358,7 @@ MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검�
 2. 클래스에 명시적인 async 메서드를 추가하고 필수·선택 인자를 선언한다.
 3. 메서드에서 인자를 딕셔너리로 구성한다. 권한이 필요한 도구는 `runtime.validate()` 후 `runtime.permissions`로 검사하고, `runtime.call("원래 MCP 이름", arguments)`로 전달한다.
 4. `TOOL_METHODS`에 MCP 이름과 메서드 이름을 등록한다.
-5. `notion_tools.json` 참고 스키마와 테스트를 업데이트하고 서버를 재시작한다.
+5. `docs/notion_tools.json` 참고 스키마와 테스트를 업데이트하고 서버를 재시작한다.
 
 서버에 새 도구가 생겼는데 명시적 메서드가 없으면 시작을 중단하고 도구 이름을 알려준다.
 실시간 스키마의 최상위 인자 이름과 메서드 시그니처가 달라진 경우에도 수정할 도구를 알려준다.
@@ -373,7 +389,7 @@ MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검�
 
 ## 미지원 도구 차단
 
-`tool_runtime.py`의 `BLOCKED_TOOLS`에 다음 30개를 명시했다.
+`notion_proxy/tool_runtime.py`의 `BLOCKED_TOOLS`에 다음 30개를 명시했다.
 
 - `notion-list-private-pages`
 - `notion-list-shared-pages`
@@ -410,7 +426,7 @@ MCP 호출과 직접 Python 호출 모두 같은 도구 메서드와 권한 검�
 Python 메서드는 기능 목록으로 남기되 직접 호출하면 `PermissionError`를 발생시키며 상위 Notion으로 전달하지 않는다.
 원본 42개 도구가 그대로 노출되는 환경에서는 브릿지가 12개를 제공한다.
 변경 적용에는 서버 재시작과 클라이언트의 도구 목록 갱신이 필요하다.
-원본 notion_tools.json은 상위 서버의 참고 스냅샷이므로 차단 도구도 보존한다.
+원본 docs/notion_tools.json은 상위 서버의 참고 스냅샷이므로 차단 도구도 보존한다.
 
 ## 연결과 지원 범위
 
@@ -426,7 +442,7 @@ Python 메서드는 기능 목록으로 남기되 직접 호출하면 `Permissio
 
 ## OAuth 저장과 초기화
 
-`oauth.py`는 공식 SDK의 `OAuthClientProvider`를 재사용한다.
+`notion_proxy/oauth.py`는 공식 SDK의 `OAuthClientProvider`를 재사용한다.
 `token_endpoint_auth_method="none"`과 PKCE를 사용하며, 토큰과 등록 정보를 Windows Credential Manager에 저장한다.
 기존 자격 증명을 재사용하기 위해 keyring 서비스 이름은 유지했다.
 
@@ -460,7 +476,7 @@ Python 래퍼 직접 호출과 최소 CLI 프로세스 실행을 검증한다. 4
 다른 테스트용 MCP를 중계할 때만 다음 옵션을 사용한다.
 
 ```powershell
-uv run --frozen python -X utf8 server.py --upstream http://127.0.0.1:9000/mcp --no-oauth
+uv run --frozen python -X utf8 -m notion_proxy.server --upstream http://127.0.0.1:9000/mcp --no-oauth
 ```
 
 ### 실제 서버 권한 검사
@@ -470,12 +486,12 @@ uv run --frozen python -X utf8 server.py --upstream http://127.0.0.1:9000/mcp --
 예상과 다른 응답이 나오면 이후 쓰기 검사를 중단한다. 외부 페이지 ID는 허용 루트 밖의 실제 페이지를 지정한다.
 
 ```powershell
-uv run --frozen python -X utf8 tests/live_permissions.py --outside-page 2043192c101b802db804d8a778715854 --database 3d53192c101b80dfb6dbe54fe1fd962e --data-source collection://3d53192c-101b-80d0-88b7-000b2d29a54f --view 3d53192c-101b-81ac-a44e-000cad8a2148 --report live-permission-results.json
+uv run --frozen python -X utf8 tests/live_permissions.py --outside-page 2043192c101b802db804d8a778715854 --database 3d53192c101b80dfb6dbe54fe1fd962e --data-source collection://3d53192c-101b-80d0-88b7-000b2d29a54f --view 3d53192c-101b-81ac-a44e-000cad8a2148 --report reports/live-permission-results.json
 ```
 
 2026-09-08 서명 적용 후 재시작한 6378 서버에서 총 68건이 통과했다.
 노출 도구 12개 대조, 차단 도구 30개의 직접 호출 거부, 권한 적용 도구 10개의 금지 입력 35건 거부,
-루트 조회 및 업로드 생성 2개의 허용을 확인했다. 상세 결과는 `live-permission-results.json`에 저장했다.
+루트 조회 및 업로드 생성 2개의 허용을 확인했다. 상세 결과는 `reports/live-permission-results.json`에 저장했다.
 토큰·업로드 URL·반환 콘텐츠는 결과 파일에 저장하지 않는다.
 
 외부 DB·데이터 소스·뷰의 실물 표본은 사용하지 않았으며 해당 소속 검사와 설정 서명 변조는

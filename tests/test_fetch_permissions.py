@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mcp.types import CallToolResult, TextContent, Tool
 
-from tool_functions import NotionTools
+from notion_proxy.tool_functions import NotionTools
 
 
 SOURCE = "11111111-1111-1111-1111-111111111111"
@@ -15,7 +15,7 @@ DB = "33333333-3333-3333-3333-333333333333"
 
 class FetchPermissionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        snapshot = Path(__file__).resolve().parents[1] / "notion_tools.json"
+        snapshot = Path(__file__).resolve().parents[1] / "docs" / "notion_tools.json"
         tools = [Tool.model_validate(t) for t in json.loads(snapshot.read_text(encoding="utf-8"))]
         self.upstream = AsyncMock()
         self.wrapper = NotionTools(self.upstream, tools)

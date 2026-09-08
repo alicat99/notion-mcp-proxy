@@ -6,8 +6,8 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 from xml.etree import ElementTree
 
-from entity_lookup import fetch_entity
-from signed_config import load_config
+from .entity_lookup import fetch_entity
+from .signed_config import load_config
 
 
 SIMPLE_TYPES = frozenset({

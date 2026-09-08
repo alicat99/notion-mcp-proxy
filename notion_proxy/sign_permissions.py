@@ -1,6 +1,6 @@
 import argparse
 
-from signed_config import generate_keys, load_config, sign_config
+from .signed_config import generate_keys, load_config, sign_config
 
 
 def main():

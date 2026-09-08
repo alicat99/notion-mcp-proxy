@@ -9,10 +9,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "config"
+PRIVATE = ROOT / ".private"
 
 
-def load_config(directory=ROOT):
+def load_config(directory=CONFIG):
     content = (directory / "permissions.toml").read_bytes()
     public_key = serialization.load_pem_public_key((directory / "permissions-public.pem").read_bytes())
     if not isinstance(public_key, Ed25519PublicKey):
@@ -25,10 +27,10 @@ def load_config(directory=ROOT):
     return tomllib.loads(content.decode("utf-8"))
 
 
-def sign_config(directory=ROOT):
+def sign_config(directory=CONFIG, private_directory=PRIVATE):
     content = (directory / "permissions.toml").read_bytes()
     tomllib.loads(content.decode("utf-8"))
-    private_key = serialization.load_pem_private_key((directory / ".private" / "permissions-private.pem").read_bytes(), password=None)
+    private_key = serialization.load_pem_private_key((private_directory / "permissions-private.pem").read_bytes(), password=None)
     if not isinstance(private_key, Ed25519PrivateKey):
         raise ValueError("Permission private key must be Ed25519")
     public_key = serialization.load_pem_public_key((directory / "permissions-public.pem").read_bytes())
@@ -37,8 +39,8 @@ def sign_config(directory=ROOT):
     (directory / "permissions.sig").write_bytes(base64.b64encode(private_key.sign(content)) + b"\n")
 
 
-def generate_keys(directory=ROOT):
-    private_path = directory / ".private" / "permissions-private.pem"
+def generate_keys(directory=CONFIG, private_directory=PRIVATE):
+    private_path = private_directory / "permissions-private.pem"
     public_path = directory / "permissions-public.pem"
     if private_path.exists() or public_path.exists():
         raise FileExistsError("Permission keys already exist; refusing to replace them")

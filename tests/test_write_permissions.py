@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 from jsonschema import ValidationError
 from mcp.types import CallToolResult, Tool
 
-from permissions import object_id
-from tool_functions import NotionTools
+from notion_proxy.permissions import object_id
+from notion_proxy.tool_functions import NotionTools
 from test_fetch_permissions import DB, SOURCE, VIEW, database_text, response
 
 
@@ -19,7 +19,7 @@ ROW = "d" * 32
 
 class WritePermissionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        snapshot = Path(__file__).resolve().parents[1] / "notion_tools.json"
+        snapshot = Path(__file__).resolve().parents[1] / "docs" / "notion_tools.json"
         tools = [Tool.model_validate(t) for t in json.loads(snapshot.read_text(encoding="utf-8"))]
         self.upstream = AsyncMock()
         self.wrapper = NotionTools(self.upstream, tools)

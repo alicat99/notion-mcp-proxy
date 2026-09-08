@@ -22,15 +22,15 @@ from mcp.types import (
     Tool,
 )
 
-from server import create_bridge
-from tool_functions import NotionTools, TOOL_METHODS
-from tool_runtime import BLOCKED_TOOLS
-from upstream import connect_upstream
+from notion_proxy.server import create_bridge
+from notion_proxy.tool_functions import NotionTools, TOOL_METHODS
+from notion_proxy.tool_runtime import BLOCKED_TOOLS
+from notion_proxy.upstream import connect_upstream
 
 
 class BridgeTests(unittest.TestCase):
     def test_every_discovered_notion_tool_has_an_explicit_method(self):
-        snapshot = Path(__file__).resolve().parents[1] / "notion_tools.json"
+        snapshot = Path(__file__).resolve().parents[1] / "docs" / "notion_tools.json"
         tools = [Tool.model_validate(item) for item in json.loads(snapshot.read_text(encoding="utf-8"))]
         wrapper = NotionTools(AsyncMock(), tools)
         self.assertEqual(set(wrapper.functions), set(TOOL_METHODS) - BLOCKED_TOOLS)
@@ -51,7 +51,7 @@ class BridgeTests(unittest.TestCase):
         upstream.call_tool.assert_not_awaited()
 
     def test_upload_creation_is_allowed_without_a_root(self):
-        snapshot = Path(__file__).resolve().parents[1] / "notion_tools.json"
+        snapshot = Path(__file__).resolve().parents[1] / "docs" / "notion_tools.json"
         tools = [Tool.model_validate(item) for item in json.loads(snapshot.read_text(encoding="utf-8"))]
         upstream = AsyncMock()
         wrapper = NotionTools(upstream, tools)
@@ -155,18 +155,18 @@ async def check_bridge():
         async with connect_upstream(remote_url, use_oauth=False) as upstream:
             discovered = await upstream.list_tools()
             assert [tool.name for tool in discovered] == [tool.name for tool in tools]
-            with patch("permissions.load_config", return_value={"fetch": {"root_path": ["홈", "test"]}}):
+            with patch("notion_proxy.permissions.load_config", return_value={"fetch": {"root_path": ["홈", "test"]}}):
                 bridge = create_bridge(discovered, upstream)
             async with serve_http(bridge) as bridge_url:
                 process = await asyncio.create_subprocess_exec(
-                    sys.executable, "-X", "utf8", "client.py", "--url", bridge_url,
+                    sys.executable, "-X", "utf8", "-m", "notion_proxy.client", "--url", bridge_url,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
                 assert process.returncode == 0, stderr.decode("utf-8")
                 assert len(json.loads(stdout)["tools"]) == 3
                 process = await asyncio.create_subprocess_exec(
-                    sys.executable, "-X", "utf8", "client.py", "--url", bridge_url,
+                    sys.executable, "-X", "utf8", "-m", "notion_proxy.client", "--url", bridge_url,
                     "--tool", "notion-create-attachment",
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )

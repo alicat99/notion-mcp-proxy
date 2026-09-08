@@ -5,7 +5,7 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from oauth import create_oauth
+from .oauth import create_oauth
 
 
 @asynccontextmanager

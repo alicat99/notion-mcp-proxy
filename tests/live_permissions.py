@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mcp import Client
 from mcp.shared.exceptions import MCPError
 
-from signed_config import load_config
-from tool_functions import TOOL_METHODS
-from tool_runtime import BLOCKED_TOOLS
+from notion_proxy.signed_config import load_config
+from notion_proxy.tool_functions import TOOL_METHODS
+from notion_proxy.tool_runtime import BLOCKED_TOOLS
 
 
 async def main():

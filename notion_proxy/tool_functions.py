@@ -1,7 +1,7 @@
 from urllib.parse import urlsplit
 
-from entity_lookup import fetch_entity
-from tool_runtime import UNSET, ToolRuntime
+from .entity_lookup import fetch_entity
+from .tool_runtime import UNSET, ToolRuntime
 
 
 class NotionTools:
