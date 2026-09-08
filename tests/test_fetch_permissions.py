@@ -19,7 +19,7 @@ class FetchPermissionTests(unittest.IsolatedAsyncioTestCase):
         tools = [Tool.model_validate(t) for t in json.loads(snapshot.read_text(encoding="utf-8"))]
         self.upstream = AsyncMock()
         self.wrapper = NotionTools(self.upstream, tools)
-        self.wrapper.allowed_root = ("홈", "test")
+        self.wrapper.runtime.permissions.root_path = ("홈", "test")
 
     async def test_page_root_child_and_prefix_collision(self):
         for path, title, allowed in [
@@ -39,7 +39,7 @@ class FetchPermissionTests(unittest.IsolatedAsyncioTestCase):
                         await self.wrapper.fetch(id=DB)
 
     async def test_special_ids_and_unconfigured_root(self):
-        self.wrapper.allowed_root = ()
+        self.wrapper.runtime.permissions.root_path = ()
         for id in ("self", "notion://docs/enhanced-markdown-spec"):
             await self.wrapper.fetch(id=id)
         self.upstream.reset_mock()

@@ -1,51 +1,12 @@
-import inspect
-import json
-import tomllib
-from pathlib import Path
-from urllib.parse import urlsplit
-
-from fetch_permissions import database_path, database_members, view_source, object_id
-
-from jsonschema import validators
-
-
-UNSET = object()
-BLOCKED_TOOLS = frozenset({
-    "notion-search-agents",
-    "notion-search-sessions",
-    "notion-query-sessions",
-    "notion-spawn-session",
-    "notion-get-session-status",
-    "notion-wait-session",
-    "notion-stop-session",
-    "notion-send-message-to-session",
-    "notion-list-session-events",
-    "notion-read-session-event",
-})
+from tool_runtime import BLOCKED_TOOLS, UNSET, ToolRuntime
 
 
 class NotionTools:
     """명시적인 Notion 도구 목록. 각 메서드를 수정해 도구별 정책을 추가한다."""
 
     def __init__(self, upstream, tools):
-        self.upstream = upstream
-        config = tomllib.loads(Path(__file__).with_name("permissions.toml").read_text(encoding="utf-8"))
-        self.allowed_root = tuple(config["fetch"]["root_path"])
-        self.functions = {}
-        self.validators = {}
-        for tool in tools:
-            if tool.name in BLOCKED_TOOLS:
-                continue
-            if tool.name not in TOOL_METHODS:
-                raise ValueError(f"Add an explicit wrapper for new tool: {tool.name}")
-            function = getattr(self, TOOL_METHODS[tool.name])
-            parameters = set(inspect.signature(function).parameters)
-            if set(tool.input_schema.get("properties", {})) != parameters:
-                raise ValueError(f"Update wrapper parameters for changed tool: {tool.name}")
-            self.functions[tool.name] = function
-            validator_class = validators.validator_for(tool.input_schema)
-            validator_class.check_schema(tool.input_schema)
-            self.validators[tool.name] = validator_class(tool.input_schema)
+        self.runtime = ToolRuntime(upstream, tools, self, TOOL_METHODS)
+        self.functions = self.runtime.functions
 
     #region Tools
 
@@ -62,7 +23,7 @@ class NotionTools:
         max_highlight_length=UNSET,
     ):
         """키워드와 필터로 콘텐츠 또는 사용자를 검색한다."""
-        return await self._call("notion-search", {
+        return await self.runtime.call("notion-search", {
             "query": query,
             "query_type": query_type,
             "data_source_url": data_source_url,
@@ -84,7 +45,7 @@ class NotionTools:
         max_highlight_length=UNSET,
     ):
         """자연어로 Notion과 연결된 소스를 검색한다."""
-        return await self._call("notion-ai-search", {
+        return await self.runtime.call("notion-ai-search", {
             "query": query,
             "data_source_url": data_source_url,
             "page_url": page_url,
@@ -95,69 +56,12 @@ class NotionTools:
 
     async def fetch(self, *, id, include_transcript=UNSET, include_discussions=UNSET):
         """페이지·데이터베이스·데이터 소스·뷰 또는 self 정보를 읽는다."""
-        arguments = {
+        arguments = self.runtime.validate("notion-fetch", {
             "id": id,
             "include_transcript": include_transcript,
             "include_discussions": include_discussions,
-        }
-        arguments = {key: value for key, value in arguments.items() if value is not UNSET}
-        self.validators["notion-fetch"].validate(arguments)
-        uri = urlsplit(id)
-        if id == "self" or (uri.scheme == "notion" and uri.netloc == "docs" and uri.path.startswith("/")):
-            return await self._call("notion-fetch", arguments)
-        if not self.allowed_root:
-            raise PermissionError("Fetch root is not configured")
-        result, entity = await self._fetch_entity(arguments)
-        kind = entity["metadata"]["type"]
-        if kind == "page":
-            # path excludes the page itself; use ancestry to recognize the root.
-            if "path" in entity:
-                path = tuple(entity["path"].split(" / "))
-            else:
-                path = database_path(entity)
-            self._check_path(path, entity["title"])
-        elif kind == "database":
-            self._check_path(database_path(entity), entity["title"])
-        elif kind in {"data_source", "view"}:
-            source = entity
-            source_id = object_id(id)
-            if kind == "view":
-                source_url = view_source(entity)
-                source_id = object_id(source_url)
-                _, source = await self._fetch_entity({"id": source_url})
-            if source["metadata"]["type"] != "data_source":
-                raise PermissionError("Cannot verify data source")
-            _, database = await self._fetch_entity({"id": source["url"]})
-            if database["metadata"]["type"] != "database":
-                raise PermissionError("Cannot verify owning database")
-            self._check_path(database_path(database), database["title"])
-            sources, views = database_members(database)
-            # Multiple/linked sources need an ownership contract not supplied by fetch.
-            if sources != {source_id} or (kind == "view" and object_id(id) not in views):
-                raise PermissionError("Cannot verify data source or view membership")
-        else:
-            raise PermissionError("Unsupported fetch entity type")
-        return result
-
-    #region Fetch permissions
-
-    async def _fetch_entity(self, arguments):
-        result = await self._call("notion-fetch", arguments)
-        if result.is_error:
-            raise PermissionError("Fetch target could not be verified")
-        try:
-            entity = json.loads(result.content[0].text)
-            entity["metadata"]["type"]
-        except (ValueError, KeyError, IndexError, AttributeError, TypeError) as error:
-            raise PermissionError("Unrecognized fetch response") from error
-        return result, entity
-
-    def _check_path(self, ancestors, title):
-        root = self.allowed_root
-        if ancestors[:len(root)] != root and ancestors + (title,) != root:
-            raise PermissionError("Fetch target is outside the allowed root")
-
-    #endregion
+        })
+        return await self.runtime.permissions.fetch(arguments)
 
     async def create_attachment(
         self, *,
@@ -168,7 +72,7 @@ class NotionTools:
         source_file_id=UNSET,
     ):
         """텍스트·외부 URL·업로드 ID로 첨부를 만든다."""
-        return await self._call("notion-create-attachment", {
+        return await self.runtime.call("notion-create-attachment", {
             "filename": filename,
             "content_type": content_type,
             "content": content,
@@ -178,20 +82,20 @@ class NotionTools:
 
     async def create_file_upload(self, *, filename, content_type=UNSET):
         """로컬 파일을 전송할 업로드 URL을 발급한다."""
-        return await self._call("notion-create-file-upload", {
+        return await self.runtime.call("notion-create-file-upload", {
             "filename": filename,
             "content_type": content_type,
         })
 
     async def download_attachment(self, *, file_upload_id):
         """작은 UTF-8 텍스트 첨부의 내용을 읽는다."""
-        return await self._call("notion-download-attachment", {
+        return await self.runtime.call("notion-download-attachment", {
             "file_upload_id": file_upload_id,
         })
 
     async def create_pages(self, *, pages, creation_mode=UNSET, parent=UNSET, allow_async=UNSET):
         """부모 위치와 속성·본문을 지정해 페이지들을 만든다."""
-        return await self._call("notion-create-pages", {
+        return await self.runtime.call("notion-create-pages", {
             "pages": pages,
             "creation_mode": creation_mode,
             "parent": parent,
@@ -217,7 +121,7 @@ class NotionTools:
         allow_async=UNSET,
     ):
         """명령에 따라 페이지 속성·본문·아이콘 등을 수정한다."""
-        return await self._call("notion-update-page", {
+        return await self.runtime.call("notion-update-page", {
             "page_id": page_id,
             "command": command,
             "properties": properties,
@@ -237,26 +141,26 @@ class NotionTools:
 
     async def convert_page_to_skill(self, *, page_url):
         """기존 페이지를 Notion Skill로 지정한다."""
-        return await self._call("notion-convert-page-to-skill", {
+        return await self.runtime.call("notion-convert-page-to-skill", {
             "page_url": page_url,
         })
 
     async def search_skills(self, *, query=UNSET):
         """사용 가능한 Notion Skill을 검색한다."""
-        return await self._call("notion-search-skills", {
+        return await self.runtime.call("notion-search-skills", {
             "query": query,
         })
 
     async def move_pages(self, *, page_or_database_ids, new_parent):
         """페이지 또는 데이터베이스들을 다른 부모로 이동한다."""
-        return await self._call("notion-move-pages", {
+        return await self.runtime.call("notion-move-pages", {
             "page_or_database_ids": page_or_database_ids,
             "new_parent": new_parent,
         })
 
     async def duplicate_page(self, *, page_id):
         """페이지를 복제하고 비동기 작업 정보를 반환한다."""
-        return await self._call("notion-duplicate-page", {
+        return await self.runtime.call("notion-duplicate-page", {
             "page_id": page_id,
         })
 
@@ -269,7 +173,7 @@ class NotionTools:
         database_type=UNSET,
     ):
         """스키마나 데이터베이스 유형으로 데이터베이스를 만든다."""
-        return await self._call("notion-create-database", {
+        return await self.runtime.call("notion-create-database", {
             "parent": parent,
             "title": title,
             "description": description,
@@ -279,7 +183,7 @@ class NotionTools:
 
     async def create_folder(self, *, parent, title):
         """페이지 또는 폴더 아래에 폴더를 만든다."""
-        return await self._call("notion-create-folder", {
+        return await self.runtime.call("notion-create-folder", {
             "parent": parent,
             "title": title,
         })
@@ -293,7 +197,7 @@ class NotionTools:
         title=UNSET,
     ):
         """명령에 따라 폴더의 파일이나 제목을 수정한다."""
-        return await self._call("notion-update-folder", {
+        return await self.runtime.call("notion-update-folder", {
             "folder_id": folder_id,
             "command": command,
             "file_upload_ids": file_upload_ids,
@@ -311,7 +215,7 @@ class NotionTools:
         in_trash=UNSET,
     ):
         """데이터 소스의 스키마·제목·속성을 수정한다."""
-        return await self._call("notion-update-data-source", {
+        return await self.runtime.call("notion-update-data-source", {
             "data_source_id": data_source_id,
             "statements": statements,
             "title": title,
@@ -329,7 +233,7 @@ class NotionTools:
         markdown=UNSET,
     ):
         """페이지에 댓글을 작성하거나 기존 토론에 답한다."""
-        return await self._call("notion-create-comment", {
+        return await self.runtime.call("notion-create-comment", {
             "page_id": page_id,
             "discussion_id": discussion_id,
             "selection_with_ellipsis": selection_with_ellipsis,
@@ -345,7 +249,7 @@ class NotionTools:
         discussion_id=UNSET,
     ):
         """페이지의 댓글과 토론을 읽는다."""
-        return await self._call("notion-get-comments", {
+        return await self.runtime.call("notion-get-comments", {
             "page_id": page_id,
             "include_resolved": include_resolved,
             "include_all_blocks": include_all_blocks,
@@ -354,19 +258,19 @@ class NotionTools:
 
     async def get_async_task(self, *, task_id):
         """Notion 비동기 작업의 현재 상태를 읽는다."""
-        return await self._call("notion-get-async-task", {
+        return await self.runtime.call("notion-get-async-task", {
             "task_id": task_id,
         })
 
     async def get_teams(self, *, query=UNSET):
         """워크스페이스의 팀스페이스를 조회한다."""
-        return await self._call("notion-get-teams", {
+        return await self.runtime.call("notion-get-teams", {
             "query": query,
         })
 
     async def get_users(self, *, query=UNSET, start_cursor=UNSET, page_size=UNSET, user_id=UNSET):
         """워크스페이스의 사용자와 게스트를 조회한다."""
-        return await self._call("notion-get-users", {
+        return await self.runtime.call("notion-get-users", {
             "query": query,
             "start_cursor": start_cursor,
             "page_size": page_size,
@@ -375,13 +279,13 @@ class NotionTools:
 
     async def query_data_sources(self, *, data):
         """중첩 data 객체의 모드에 따라 행·SQL·뷰를 조회한다."""
-        return await self._call("notion-query-data-sources", {
+        return await self.runtime.call("notion-query-data-sources", {
             "data": data,
         })
 
     async def query_multiple_data_sources(self, *, query, data_source_urls, params=UNSET, mode=UNSET):
         """여러 데이터 소스를 읽기 전용 SQL로 조회한다. 서버가 노출하는 기존 도구다."""
-        return await self._call("notion-query-multiple-data-sources", {
+        return await self.runtime.call("notion-query-multiple-data-sources", {
             "query": query,
             "data_source_urls": data_source_urls,
             "params": params,
@@ -390,41 +294,41 @@ class NotionTools:
 
     async def query_meeting_notes(self, *, filter=UNSET):
         """현재 사용자의 회의록을 필터링해 조회한다."""
-        return await self._call("notion-query-meeting-notes", {
+        return await self.runtime.call("notion-query-meeting-notes", {
             "filter": filter,
         })
 
     async def list_private_pages(self, *, limit=UNSET, cursor=UNSET):
         """개인 사이드바의 최상위 페이지와 데이터베이스를 조회한다."""
-        return await self._call("notion-list-private-pages", {
+        return await self.runtime.call("notion-list-private-pages", {
             "limit": limit,
             "cursor": cursor,
         })
 
     async def list_shared_pages(self, *, limit=UNSET, cursor=UNSET):
         """공유 사이드바의 페이지와 데이터베이스를 조회한다."""
-        return await self._call("notion-list-shared-pages", {
+        return await self.runtime.call("notion-list-shared-pages", {
             "limit": limit,
             "cursor": cursor,
         })
 
     async def list_favorite_pages(self, *, limit=UNSET, cursor=UNSET):
         """즐겨찾는 페이지와 데이터베이스를 조회한다."""
-        return await self._call("notion-list-favorite-pages", {
+        return await self.runtime.call("notion-list-favorite-pages", {
             "limit": limit,
             "cursor": cursor,
         })
 
     async def list_recent_pages(self, *, limit=UNSET, cursor=UNSET):
         """최근 방문한 페이지와 데이터베이스를 조회한다."""
-        return await self._call("notion-list-recent-pages", {
+        return await self.runtime.call("notion-list-recent-pages", {
             "limit": limit,
             "cursor": cursor,
         })
 
     async def search_agents(self, *, scope, query=UNSET, limit=UNSET, cursor=UNSET):
         """Custom Agent를 검색하거나 범위에 따라 목록을 조회한다."""
-        return await self._call("notion-search-agents", {
+        return await self.runtime.call("notion-search-agents", {
             "scope": scope,
             "query": query,
             "limit": limit,
@@ -433,7 +337,7 @@ class NotionTools:
 
     async def search_sessions(self, *, question, lookback=UNSET):
         """주제와 기간으로 과거 에이전트 세션을 검색한다."""
-        return await self._call("notion-search-sessions", {
+        return await self.runtime.call("notion-search-sessions", {
             "question": question,
             "lookback": lookback,
         })
@@ -447,7 +351,7 @@ class NotionTools:
         page_size=UNSET,
     ):
         """필터·정렬·제목 검색으로 에이전트 세션을 조회한다."""
-        return await self._call("notion-query-sessions", {
+        return await self.runtime.call("notion-query-sessions", {
             "query": query,
             "filter": filter,
             "sorts": sorts,
@@ -457,33 +361,33 @@ class NotionTools:
 
     async def spawn_session(self, *, agent_url, initial_message):
         """공개된 Custom Agent의 새 세션을 시작한다."""
-        return await self._call("notion-spawn-session", {
+        return await self.runtime.call("notion-spawn-session", {
             "agent_url": agent_url,
             "initial_message": initial_message,
         })
 
     async def get_session_status(self, *, session_url):
         """에이전트 세션의 최신 상태를 읽는다."""
-        return await self._call("notion-get-session-status", {
+        return await self.runtime.call("notion-get-session-status", {
             "session_url": session_url,
         })
 
     async def wait_session(self, *, session_url, seconds):
         """에이전트 세션이 멈추거나 완료될 때까지 지정 시간 동안 기다린다."""
-        return await self._call("notion-wait-session", {
+        return await self.runtime.call("notion-wait-session", {
             "session_url": session_url,
             "seconds": seconds,
         })
 
     async def stop_session(self, *, session_url):
         """실행 중인 에이전트 세션을 중지한다."""
-        return await self._call("notion-stop-session", {
+        return await self.runtime.call("notion-stop-session", {
             "session_url": session_url,
         })
 
     async def send_message_to_session(self, *, session_url, message):
         """에이전트 세션에 후속 메시지를 보낸다."""
-        return await self._call("notion-send-message-to-session", {
+        return await self.runtime.call("notion-send-message-to-session", {
             "session_url": session_url,
             "message": message,
         })
@@ -496,7 +400,7 @@ class NotionTools:
         after_sequence=UNSET,
     ):
         """세션에 저장된 이벤트의 요약 목록을 읽는다."""
-        return await self._call("notion-list-session-events", {
+        return await self.runtime.call("notion-list-session-events", {
             "session_url": session_url,
             "count": count,
             "before_sequence": before_sequence,
@@ -505,7 +409,7 @@ class NotionTools:
 
     async def read_session_event(self, *, session_url, sequence):
         """세션의 특정 이벤트 내용을 읽는다."""
-        return await self._call("notion-read-session-event", {
+        return await self.runtime.call("notion-read-session-event", {
             "session_url": session_url,
             "sequence": sequence,
         })
@@ -520,7 +424,7 @@ class NotionTools:
         configure=UNSET,
     ):
         """데이터베이스에 유형과 구성을 지정한 뷰를 만든다."""
-        return await self._call("notion-create-view", {
+        return await self.runtime.call("notion-create-view", {
             "data_source_id": data_source_id,
             "name": name,
             "type": type,
@@ -531,7 +435,7 @@ class NotionTools:
 
     async def update_view(self, *, view_id, name=UNSET, configure=UNSET):
         """뷰의 이름과 필터·정렬·표시 구성을 수정한다."""
-        return await self._call("notion-update-view", {
+        return await self.runtime.call("notion-update-view", {
             "view_id": view_id,
             "name": name,
             "configure": configure,
@@ -539,22 +443,13 @@ class NotionTools:
 
     async def show_advanced_analysis_next_steps(self):
         """고급 분석 사용을 위한 다음 단계 안내를 조회한다."""
-        return await self._call("notion-show-advanced-analysis-next-steps", {})
+        return await self.runtime.call("notion-show-advanced-analysis-next-steps", {})
 
     async def check_mcp_next_steps(self):
         """Notion MCP 사용에 대한 다음 단계 안내를 조회한다."""
-        return await self._call("notion-check-mcp-next-steps", {})
+        return await self.runtime.call("notion-check-mcp-next-steps", {})
 
     #endregion
-
-    async def _call(self, name, arguments):
-        if name in BLOCKED_TOOLS:
-            raise PermissionError(f"Tool access denied: {name}")
-        arguments = {key: value for key, value in arguments.items() if value is not UNSET}
-        self.validators[name].validate(arguments)
-        # Shared permission checks can be added here before transmission.
-        return await self.upstream.call_tool(name, arguments)
-
 
 TOOL_METHODS = {
     "notion-search": "search",
