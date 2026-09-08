@@ -178,3 +178,7 @@ tool_timeout_sec = 120
 - `notion-wait-session`
 
 차단 목록은 [notion_proxy/tool_runtime.py](notion_proxy/tool_runtime.py)의 `BLOCKED_TOOLS`에서 관리한다. [docs/notion_tools.json](docs/notion_tools.json)은 원본 참고 스냅샷이므로 차단한 도구도 보존한다.
+
+## 라이선스
+
+이 프로젝트는 [MIT 라이선스](LICENSE)로 배포한다. 포함된 공식 MCP Python SDK의 저작권 및 라이선스는 [vendor/python-sdk/LICENSE](vendor/python-sdk/LICENSE)에 보존되어 있다.
