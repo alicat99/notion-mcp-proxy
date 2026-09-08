@@ -199,7 +199,7 @@ def view_id(value):
         if len(values) != 1:
             raise PermissionError("View URL must contain exactly one v parameter")
         value = values[0]
-    return "view://" + object_id(value)
+    return "view://" + str(UUID(object_id(value)))
 
 
 def require_view_config(configure):

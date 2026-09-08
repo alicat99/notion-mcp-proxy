@@ -58,7 +58,7 @@ class ViewPermissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_normalizes_uuid_uri_and_url_to_same_view(self):
         for id in (VIEW, "view://" + VIEW, "https://www.notion.so/" + DB + "?v=" + VIEW):
             self.assertIs(await self.wrapper.update_view(view_id=id, name="새 이름"), self.result)
-            self.upstream.call_tool.assert_awaited_with("notion-update-view", {"view_id": "view://" + object_id(VIEW), "name": "새 이름"})
+            self.upstream.call_tool.assert_awaited_with("notion-update-view", {"view_id": "view://" + VIEW, "name": "새 이름"})
 
     async def test_unlisted_linked_view_update_allowed_but_fetch_still_denied(self):
         self.entities[object_id(DB)] = response("database", title="db", text=database_text().replace(VIEW, PAGE))
