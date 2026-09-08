@@ -40,6 +40,7 @@ class NotionTools:
         arguments["page_url"] = await self.runtime.permissions.search_scope(arguments)
         return await self.runtime.call("notion-search", arguments)
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def ai_search(
         self, *,
         query,
@@ -159,12 +160,14 @@ class NotionTools:
             raise PermissionError("The allowed root's properties cannot be changed")
         return await self.runtime.call("notion-update-page", arguments)
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def convert_page_to_skill(self, *, page_url):
         """기존 페이지를 Notion Skill로 지정한다."""
         return await self.runtime.call("notion-convert-page-to-skill", {
             "page_url": page_url,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def search_skills(self, *, query=UNSET):
         """사용 가능한 Notion Skill을 검색한다."""
         return await self.runtime.call("notion-search-skills", {
@@ -209,6 +212,7 @@ class NotionTools:
         await self.runtime.permissions.require_database_creation(arguments)
         return await self.runtime.call("notion-create-database", arguments)
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def create_folder(self, *, parent, title):
         """페이지 또는 폴더 아래에 폴더를 만든다."""
         return await self.runtime.call("notion-create-folder", {
@@ -216,6 +220,7 @@ class NotionTools:
             "title": title,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def update_folder(
         self, *,
         folder_id,
@@ -254,6 +259,7 @@ class NotionTools:
         arguments["data_source_id"] = await self.runtime.permissions.require_source_update(arguments)
         return await self.runtime.call("notion-update-data-source", arguments)
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def create_comment(
         self, *,
         page_id,
@@ -271,6 +277,7 @@ class NotionTools:
             "markdown": markdown,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def get_comments(
         self, *,
         page_id,
@@ -356,6 +363,7 @@ class NotionTools:
             "cursor": cursor,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def search_agents(self, *, scope, query=UNSET, limit=UNSET, cursor=UNSET):
         """Custom Agent를 검색하거나 범위에 따라 목록을 조회한다."""
         return await self.runtime.call("notion-search-agents", {
@@ -365,6 +373,7 @@ class NotionTools:
             "cursor": cursor,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def search_sessions(self, *, question, lookback=UNSET):
         """주제와 기간으로 과거 에이전트 세션을 검색한다."""
         return await self.runtime.call("notion-search-sessions", {
@@ -372,6 +381,7 @@ class NotionTools:
             "lookback": lookback,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def query_sessions(
         self, *,
         query=UNSET,
@@ -389,6 +399,7 @@ class NotionTools:
             "page_size": page_size,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def spawn_session(self, *, agent_url, initial_message):
         """공개된 Custom Agent의 새 세션을 시작한다."""
         return await self.runtime.call("notion-spawn-session", {
@@ -396,12 +407,14 @@ class NotionTools:
             "initial_message": initial_message,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def get_session_status(self, *, session_url):
         """에이전트 세션의 최신 상태를 읽는다."""
         return await self.runtime.call("notion-get-session-status", {
             "session_url": session_url,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def wait_session(self, *, session_url, seconds):
         """에이전트 세션이 멈추거나 완료될 때까지 지정 시간 동안 기다린다."""
         return await self.runtime.call("notion-wait-session", {
@@ -409,12 +422,14 @@ class NotionTools:
             "seconds": seconds,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def stop_session(self, *, session_url):
         """실행 중인 에이전트 세션을 중지한다."""
         return await self.runtime.call("notion-stop-session", {
             "session_url": session_url,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def send_message_to_session(self, *, session_url, message):
         """에이전트 세션에 후속 메시지를 보낸다."""
         return await self.runtime.call("notion-send-message-to-session", {
@@ -422,6 +437,7 @@ class NotionTools:
             "message": message,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def list_session_events(
         self, *,
         session_url,
@@ -437,6 +453,7 @@ class NotionTools:
             "after_sequence": after_sequence,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def read_session_event(self, *, session_url, sequence):
         """세션의 특정 이벤트 내용을 읽는다."""
         return await self.runtime.call("notion-read-session-event", {
