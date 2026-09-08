@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import inspect
 
 import uvicorn
 from jsonschema import ValidationError
@@ -7,7 +8,7 @@ from mcp.server import Server
 from mcp.shared.exceptions import MCPError
 from mcp.types import INVALID_PARAMS, ListToolsResult
 
-from tool_functions import build_functions
+from tool_functions import NotionTools
 from upstream import connect_upstream
 
 
@@ -28,7 +29,7 @@ async def main():
 
 
 def create_bridge(tools, upstream):
-    functions = build_functions(tools, upstream)
+    functions = NotionTools(upstream, tools).functions
 
     async def list_tools(ctx, params):
         return ListToolsResult(tools=tools)
@@ -36,8 +37,13 @@ def create_bridge(tools, upstream):
     async def call_tool(ctx, params):
         if params.name not in functions:
             raise MCPError(INVALID_PARAMS, "Unknown tool")
+        arguments = params.arguments or {}
         try:
-            return await functions[params.name](**(params.arguments or {}))
+            inspect.signature(functions[params.name]).bind(**arguments)
+        except TypeError as error:
+            raise MCPError(INVALID_PARAMS, "Invalid tool arguments") from error
+        try:
+            return await functions[params.name](**arguments)
         except ValidationError as error:
             path = ".".join(str(part) for part in error.absolute_path) or "arguments"
             raise MCPError(INVALID_PARAMS, f"Invalid tool arguments at {path}") from error
