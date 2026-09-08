@@ -14,7 +14,7 @@ from upstream import connect_upstream
 
 async def main():
     parser = argparse.ArgumentParser(description="Notion MCP bridge")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=6378)
     parser.add_argument("--upstream", default="https://mcp.notion.com/mcp")
     parser.add_argument("--no-oauth", action="store_true")
     options = parser.parse_args()

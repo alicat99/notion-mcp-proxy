@@ -1,0 +1,3 @@
+[mcp_servers.notion_proxy]
+url = "http://127.0.0.1:6378/mcp"
+tool_timeout_sec = 120

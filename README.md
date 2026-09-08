@@ -54,11 +54,11 @@ uv run --frozen python -X utf8 server.py
 1. 서버가 연 브라우저에서 Notion 로그인·연결 승인을 한다.
 2. `http://127.0.0.1:8765/callback?...`으로 이동한 주소 전체를 복사한다.
 3. **터미널 A의 `Callback URL:`**에 쿼리를 포함해 붙여넣는다.
-4. `Loaded ... tools. Bridge: http://127.0.0.1:8000/mcp`와 Uvicorn 시작 메시지를 기다린다.
+4. `Loaded ... tools. Bridge: http://127.0.0.1:6378/mcp`와 Uvicorn 시작 메시지를 기다린다.
 
 콜백 HTTP 서버는 실행하지 않는 수동 입력 방식이므로 브라우저의 연결 실패 화면은 정상이다.
 콜백 URL은 일회용 인증 코드를 포함하므로 공유하거나 이전 URL을 재사용하지 않는다.
-종료는 Ctrl+C. 로컬 포트를 바꾸려면 `--port 8001`을 추가한다.
+종료는 Ctrl+C. 로컬 포트를 바꾸려면 `--port 6379`을 추가한다.
 
 OAuth·keyring은 서버 프로세스에만 있다. 최소 클라이언트에서는 로그인하지 않는다.
 기존 `client.py --oauth` 방식은 제거했다.
@@ -80,10 +80,32 @@ uv run --frozen python -X utf8 client.py --tool notion-fetch --args-file example
 다른 포트의 브릿지에 연결:
 
 ```powershell
-uv run --frozen python -X utf8 client.py --url http://127.0.0.1:8001/mcp
+uv run --frozen python -X utf8 client.py --url http://127.0.0.1:6379/mcp
 ```
 
 `-X utf8`은 Windows 한국어 입출력을 위한 옵션이다.
+
+## 다른 프로젝트의 Codex에서 연결
+
+다른 프로젝트 루트의 `.codex/config.toml`에 다음 설정을 추가한다.
+복사 가능한 파일은 `examples/codex-config.toml`이다. 기존 설정이 있으면 해당 섹션만 병합한다.
+
+```toml
+[mcp_servers.notion_proxy]
+url = "http://127.0.0.1:6378/mcp"
+tool_timeout_sec = 120
+```
+
+먼저 이 프로젝트에서 `uv run --frozen python -X utf8 server.py`를 실행하고 OAuth 및 도구 로딩을 완료한다.
+그 다음 대상 프로젝트의 Codex를 다시 열어 연결한다. 이 URL 설정은 이미 실행 중인 서버에 연결하며,
+서버 프로세스를 자동으로 시작하지 않는다. 서버 터미널을 계속 실행해 두어야 한다.
+Notion OAuth는 브릿지가 담당하므로 이 설정에 Notion 토큰이나 OAuth 설정을 넣지 않는다.
+
+프로젝트별 `.codex/config.toml`은 Codex에서 신뢰한 프로젝트에 적용된다.
+Codex와 브릿지는 같은 컴퓨터에서 실행해야 한다. 원격 환경의 `127.0.0.1`은 이 Windows 컴퓨터를 가리키지 않는다.
+여러 프로젝트가 같은 서버 URL을 사용할 수 있으며, 모두 동일한 Notion 연결과 현재 권한을 공유한다.
+
+설정 형식 참고: [OpenAI 공식 MCP 연결 문서](https://developers.openai.com/codex/mcp).
 
 ## 원하는 도구 호출
 

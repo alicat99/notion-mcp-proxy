@@ -8,7 +8,7 @@ from mcp import Client
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8000/mcp")
+    parser.add_argument("--url", default="http://127.0.0.1:6378/mcp")
     parser.add_argument("--tool")
     parser.add_argument("--args-file", type=Path)
     options = parser.parse_args()
