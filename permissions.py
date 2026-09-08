@@ -2,13 +2,12 @@
 
 import json
 import re
-import tomllib
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 from xml.etree import ElementTree
 
 from entity_lookup import fetch_entity
+from signed_config import load_config
 
 
 SIMPLE_TYPES = frozenset({
@@ -21,7 +20,7 @@ SIMPLE_TYPES = frozenset({
 class Permissions:
     def __init__(self, call):
         self.call = call
-        config = tomllib.loads(Path(__file__).with_name("permissions.toml").read_text(encoding="utf-8"))
+        config = load_config()
         self.root_path = tuple(config["fetch"]["root_path"])
         self.root_id = config["fetch"].get("root_id", "")
 

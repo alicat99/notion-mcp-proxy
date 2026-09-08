@@ -2,7 +2,15 @@
 name = "notion-proxy-playground"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["mcp[cli]", "mcp-types", "httpx2", "keyring", "jsonschema", "uvicorn"]
+dependencies = [
+    "mcp[cli]",
+    "mcp-types",
+    "httpx2",
+    "keyring",
+    "jsonschema",
+    "uvicorn",
+    "cryptography>=50.0.1",
+]
 
 [tool.uv.sources]
 mcp = { path = "vendor/python-sdk", editable = true }

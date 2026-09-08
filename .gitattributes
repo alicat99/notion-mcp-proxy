@@ -1,0 +1,2 @@
+# Preserve the exact bytes covered by the signature on every platform.
+permissions.toml -text

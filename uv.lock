@@ -462,6 +462,7 @@ name = "notion-proxy-playground"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "httpx2" },
     { name = "jsonschema" },
     { name = "keyring" },
@@ -472,6 +473,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=50.0.1" },
     { name = "httpx2" },
     { name = "jsonschema" },
     { name = "keyring" },

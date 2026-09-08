@@ -155,7 +155,7 @@ async def check_bridge():
         async with connect_upstream(remote_url, use_oauth=False) as upstream:
             discovered = await upstream.list_tools()
             assert [tool.name for tool in discovered] == [tool.name for tool in tools]
-            with patch("permissions.tomllib.loads", return_value={"fetch": {"root_path": ["홈", "test"]}}):
+            with patch("permissions.load_config", return_value={"fetch": {"root_path": ["홈", "test"]}}):
                 bridge = create_bridge(discovered, upstream)
             async with serve_http(bridge) as bridge_url:
                 process = await asyncio.create_subprocess_exec(

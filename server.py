@@ -10,6 +10,7 @@ from mcp.types import INVALID_PARAMS, ListToolsResult
 
 from tool_functions import NotionTools
 from tool_runtime import BLOCKED_TOOLS
+from signed_config import load_config
 from upstream import connect_upstream
 
 
@@ -20,6 +21,7 @@ async def main():
     parser.add_argument("--no-oauth", action="store_true")
     options = parser.parse_args()
 
+    load_config()
     async with connect_upstream(options.upstream, not options.no_oauth) as upstream:
         tools = await upstream.list_tools()
         bridge = create_bridge(tools, upstream)
