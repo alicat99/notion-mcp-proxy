@@ -463,6 +463,24 @@ Python 래퍼 직접 호출과 최소 CLI 프로세스 실행을 검증한다. 4
 uv run --frozen python -X utf8 server.py --upstream http://127.0.0.1:9000/mcp --no-oauth
 ```
 
+### 실제 서버 권한 검사
+
+`tests/live_permissions.py`로 실행 중인 서버에 거부 요청과 허용 대조 요청을 보낼 수 있다.
+페이지·뷰 등을 만드는 요청은 거부되어야 하며, 허용 대조 검사에서는 페이지에 연결하지 않은 업로드 2개를 생성한다.
+예상과 다른 응답이 나오면 이후 쓰기 검사를 중단한다. 외부 페이지 ID는 허용 루트 밖의 실제 페이지를 지정한다.
+
+```powershell
+uv run --frozen python -X utf8 tests/live_permissions.py --outside-page 2043192c101b802db804d8a778715854 --database 3d53192c101b80dfb6dbe54fe1fd962e --data-source collection://3d53192c-101b-80d0-88b7-000b2d29a54f --view 3d53192c-101b-81ac-a44e-000cad8a2148 --report live-permission-results.json
+```
+
+2026-09-08 서명 적용 후 재시작한 6378 서버에서 총 68건이 통과했다.
+노출 도구 12개 대조, 차단 도구 30개의 직접 호출 거부, 권한 적용 도구 10개의 금지 입력 35건 거부,
+루트 조회 및 업로드 생성 2개의 허용을 확인했다. 상세 결과는 `live-permission-results.json`에 저장했다.
+토큰·업로드 URL·반환 콘텐츠는 결과 파일에 저장하지 않는다.
+
+외부 DB·데이터 소스·뷰의 실물 표본은 사용하지 않았으며 해당 소속 검사와 설정 서명 변조는
+자동 테스트로 보완했다. 이는 검사한 사례의 결과이며, 모든 입력·동시 변경에 대한 보안 증명은 아니다.
+
 ## SDK 출처
 
 - 공식 저장소: https://github.com/modelcontextprotocol/python-sdk
