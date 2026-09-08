@@ -26,7 +26,7 @@ class NotionTools:
         max_highlight_length=UNSET,
     ):
         """키워드와 필터로 콘텐츠 또는 사용자를 검색한다."""
-        return await self.runtime.call("notion-search", {
+        arguments = self.runtime.validate("notion-search", {
             "query": query,
             "query_type": query_type,
             "data_source_url": data_source_url,
@@ -37,6 +37,8 @@ class NotionTools:
             "page_size": page_size,
             "max_highlight_length": max_highlight_length,
         })
+        arguments["page_url"] = await self.runtime.permissions.search_scope(arguments)
+        return await self.runtime.call("notion-search", arguments)
 
     async def ai_search(
         self, *,
@@ -182,9 +184,11 @@ class NotionTools:
 
     async def duplicate_page(self, *, page_id):
         """페이지를 복제하고 비동기 작업 정보를 반환한다."""
-        return await self.runtime.call("notion-duplicate-page", {
+        arguments = self.runtime.validate("notion-duplicate-page", {
             "page_id": page_id,
         })
+        await self.runtime.permissions.require_target(page_id, {"page"}, allow_root=False)
+        return await self.runtime.call("notion-duplicate-page", arguments)
 
     async def create_database(
         self, *,
@@ -195,13 +199,15 @@ class NotionTools:
         database_type=UNSET,
     ):
         """스키마나 데이터베이스 유형으로 데이터베이스를 만든다."""
-        return await self.runtime.call("notion-create-database", {
+        arguments = self.runtime.validate("notion-create-database", {
             "parent": parent,
             "title": title,
             "description": description,
             "schema": schema,
             "database_type": database_type,
         })
+        await self.runtime.permissions.require_database_creation(arguments)
+        return await self.runtime.call("notion-create-database", arguments)
 
     async def create_folder(self, *, parent, title):
         """페이지 또는 폴더 아래에 폴더를 만든다."""
@@ -237,7 +243,7 @@ class NotionTools:
         in_trash=UNSET,
     ):
         """데이터 소스의 스키마·제목·속성을 수정한다."""
-        return await self.runtime.call("notion-update-data-source", {
+        arguments = self.runtime.validate("notion-update-data-source", {
             "data_source_id": data_source_id,
             "statements": statements,
             "title": title,
@@ -245,6 +251,8 @@ class NotionTools:
             "is_inline": is_inline,
             "in_trash": in_trash,
         })
+        arguments["data_source_id"] = await self.runtime.permissions.require_source_update(arguments)
+        return await self.runtime.call("notion-update-data-source", arguments)
 
     async def create_comment(
         self, *,

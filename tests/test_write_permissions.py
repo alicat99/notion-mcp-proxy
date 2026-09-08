@@ -159,5 +159,64 @@ class WritePermissionTests(unittest.IsolatedAsyncioTestCase):
             await self.wrapper.update_page(page_id=CHILD, command="insert_content", content="x")
         self.assert_no_writes()
 
+    async def test_search_forces_root_and_rejects_other_scopes(self):
+        self.wrapper.runtime.permissions.root_id = ROOT
+        await self.wrapper.search(query="x", page_url=OUTSIDE, max_highlight_length=0)
+        self.upstream.call_tool.assert_awaited_with("notion-search", {
+            "query": "x", "page_url": ROOT, "max_highlight_length": 0,
+        })
+        self.upstream.call_tool.reset_mock()
+        for extra in ({"query_type": "user"}, {"data_source_url": SOURCE},
+                      {"teamspace_id": OUTSIDE}, {"filters": {"teamspace_ids": [OUTSIDE]}}):
+            with self.assertRaises(PermissionError):
+                await self.wrapper.search(query="x", **extra)
+        for root in (CHILD, OUTSIDE, ""):
+            self.wrapper.runtime.permissions.root_id = root
+            with self.assertRaises(PermissionError):
+                await self.wrapper.search(query="x")
+        self.assert_no_writes()
+
+    async def test_duplicate_child_allowed_root_outside_and_database_denied(self):
+        await self.wrapper.duplicate_page(page_id=CHILD)
+        self.upstream.call_tool.assert_awaited_with("notion-duplicate-page", {"page_id": CHILD})
+        self.upstream.call_tool.reset_mock()
+        for id in (ROOT, OUTSIDE, DB):
+            with self.assertRaises(PermissionError):
+                await self.wrapper.duplicate_page(page_id=id)
+        self.assert_no_writes()
+
+    async def test_create_database_parent_and_schema_policy(self):
+        args = {"parent": {"page_id": ROOT}, "schema": '''CREATE TABLE ("Name" TITLE, "Tags" MULTI_SELECT('a;b':blue))'''}
+        await self.wrapper.create_database(**args)
+        self.upstream.call_tool.assert_awaited_with("notion-create-database", args)
+        self.upstream.call_tool.reset_mock()
+        for extra in ({"parent": {"page_id": OUTSIDE}}, {"parent": {}},
+                      {"database_type": "tasks"}, {"schema": '''CREATE TABLE ("R" RELATION('x'))'''},
+                      {"schema": 'CREATE TABLE ("N" TITLE); DROP TABLE x'}):
+            with self.assertRaises((PermissionError, ValidationError)):
+                await self.wrapper.create_database(**(args | extra))
+        self.assert_no_writes()
+
+    async def test_source_update_resolves_database_and_rejects_existing_relations(self):
+        self.entities[object_id(SOURCE)] = response("data_source", url=DB, text=
+            '<data-source-state>{"schema":{"Name":{"type":"title"}}}</data-source-state>')
+        for id in (SOURCE, DB, "collection://" + SOURCE):
+            await self.wrapper.update_data_source(data_source_id=id, statements='ADD COLUMN "Due" DATE', in_trash=False)
+            self.upstream.call_tool.assert_awaited_with("notion-update-data-source", {
+                "data_source_id": "collection://" + object_id(SOURCE),
+                "statements": 'ADD COLUMN "Due" DATE', "in_trash": False,
+            })
+        self.upstream.call_tool.reset_mock()
+        for extra in ({"is_inline": False}, {"statements": '''ADD COLUMN "R" RELATION('x')'''},
+                      {"statements": '''ADD COLUMN "R" ROLLUP('x','y','sum')'''}):
+            with self.assertRaises(PermissionError):
+                await self.wrapper.update_data_source(data_source_id=SOURCE, **extra)
+        for kind in ("relation", "rollup", "unknown"):
+            self.entities[object_id(SOURCE)] = response("data_source", url=DB, text=
+                '<data-source-state>' + json.dumps({"schema": {"R": {"type": kind}}}) + '</data-source-state>')
+            with self.assertRaises(PermissionError):
+                await self.wrapper.update_data_source(data_source_id=SOURCE, title="x")
+        self.assert_no_writes()
+
     def assert_no_writes(self):
         self.assertTrue(all(c.args[0] == "notion-fetch" for c in self.upstream.call_tool.await_args_list))

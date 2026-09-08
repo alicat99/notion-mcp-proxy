@@ -10,13 +10,64 @@ from xml.etree import ElementTree
 from entity_lookup import fetch_entity
 
 
+SIMPLE_TYPES = frozenset({
+    "title", "rich_text", "date", "people", "checkbox", "url", "email",
+    "phone_number", "status", "files", "created_time", "last_edited_time",
+    "created_by", "last_edited_by",
+})
+
+
 class Permissions:
     def __init__(self, call):
         self.call = call
         config = tomllib.loads(Path(__file__).with_name("permissions.toml").read_text(encoding="utf-8"))
         self.root_path = tuple(config["fetch"]["root_path"])
+        self.root_id = config["fetch"].get("root_id", "")
 
     #region Access checks
+
+    async def search_scope(self, arguments):
+        self.require_root()
+        if arguments.get("query_type", "internal") != "internal":
+            raise PermissionError("User search is disabled")
+        if "data_source_url" in arguments or "teamspace_id" in arguments or "teamspace_ids" in arguments.get("filters", {}):
+            raise PermissionError("Additional search scopes are unsupported")
+        if not self.root_id or not await self.require_target(self.root_id, {"page"}):
+            raise PermissionError("Search root ID must match the configured root path")
+        return self.root_id
+
+    async def require_database_creation(self, arguments):
+        parent = arguments.get("parent")
+        if not isinstance(parent, dict) or "page_id" not in parent:
+            raise PermissionError("Database creation requires a page parent")
+        await self.require_parent(parent)
+        if "database_type" in arguments or "schema" not in arguments:
+            raise PermissionError("An explicit non-relational schema is required")
+        require_ddl(arguments["schema"], create=True)
+
+    async def require_source_update(self, arguments):
+        if "is_inline" in arguments:
+            raise PermissionError("Changing database layout is unsupported")
+        entity, _ = await self._inspect({"id": arguments["data_source_id"]}, {"database", "data_source"})
+        if entity["metadata"]["type"] == "database":
+            sources, _ = database_members(entity)
+            if len(sources) != 1:
+                raise PermissionError("Database must have one data source")
+            source_id = next(iter(sources))
+            entity, _ = await self._inspect({"id": "collection://" + source_id}, {"data_source"})
+        else:
+            source_id = object_id(arguments["data_source_id"])
+        match = re.search(r"<data-source-state>\s*(.*?)\s*</data-source-state>", entity["text"], re.S)
+        try:
+            properties = json.loads(match[1])["schema"].values()
+            for prop in properties:
+                if prop["type"] not in SIMPLE_TYPES | {"select", "multi_select", "number", "formula", "unique_id"} or prop.get("readOnly"):
+                    raise PermissionError("Relational, synced or unknown schemas are unsupported")
+        except (TypeError, ValueError, KeyError) as error:
+            raise PermissionError("Cannot verify existing schema") from error
+        if "statements" in arguments:
+            require_ddl(arguments["statements"], create=False)
+        return "collection://" + source_id
 
     async def require_parent(self, parent):
         kinds = {"page_id": "page", "database_id": "database", "data_source_id": "data_source"}
@@ -44,7 +95,7 @@ class Permissions:
         object_id(id)
         _, is_root = await self._inspect({"id": id}, kinds)
         if is_root and not allow_root:
-            raise PermissionError("The allowed root cannot be moved")
+            raise PermissionError("The allowed root cannot be moved or duplicated")
         return is_root
 
     def require_root(self):
@@ -151,5 +202,30 @@ def object_id(value):
     if not match:
         raise PermissionError("Unrecognized entity ID")
     return UUID(match[1]).hex
+
+#endregion
+
+
+#region Schema policy
+
+
+def require_ddl(statement, *, create):
+    # Match the complete supported grammar; quoted descriptions are not SQL keywords.
+    name = r'"(?:[^"\\]|"")+"'
+    string = r"'(?:[^'\\]|'')*'"
+    colors = "default|gray|brown|orange|yellow|green|blue|purple|pink|red"
+    option = fr"{string}(?:\s*:\s*(?:{colors}))?"
+    options = fr"{option}(?:\s*,\s*{option})*"
+    simple = "|".join(sorted(SIMPLE_TYPES))
+    kind = fr"(?:(?:{simple})|NUMBER(?:\s+FORMAT\s+{string})?|(?:SELECT|MULTI_SELECT)\s*\(\s*(?:{options})?\s*\)|FORMULA\s*\(\s*{string}\s*\)|UNIQUE_ID(?:\s+PREFIX\s+{string})?)"
+    column = fr"{name}\s+{kind}(?:\s+COMMENT\s+{string})?"
+    if create:
+        grammar = fr"\s*CREATE\s+TABLE\s*\(\s*{column}(?:\s*,\s*{column})*\s*\)\s*;?\s*"
+    else:
+        command = fr"(?:ADD\s+COLUMN\s+{column}|DROP\s+COLUMN\s+{name}|RENAME\s+COLUMN\s+{name}\s+TO\s+{name}|ALTER\s+COLUMN\s+{name}\s+SET\s+{kind})"
+        grammar = fr"\s*{command}(?:\s*;\s*{command})*\s*;?\s*"
+    if not re.fullmatch(grammar, statement, re.I):
+        raise PermissionError("Unsupported DDL; relations and rollups are disabled")
+
 
 #endregion

@@ -1,3 +1,6 @@
 [fetch]
 # Absolute title path, for example ["홈", "test"]. Empty denies entity fetches.
-root_path = []
+root_path = ["홈", "test"]
+
+# Search scope; verified against root_path on every search.
+root_id = "3d53192c101b801bbfaafa7c74b40cac"
