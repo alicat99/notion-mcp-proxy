@@ -463,17 +463,21 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "httpx2" },
+    { name = "jsonschema" },
     { name = "keyring" },
     { name = "mcp", extra = ["cli"] },
     { name = "mcp-types" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx2" },
+    { name = "jsonschema" },
     { name = "keyring" },
     { name = "mcp", extras = ["cli"], editable = "vendor/python-sdk" },
     { name = "mcp-types", editable = "vendor/python-sdk/src/mcp-types" },
+    { name = "uvicorn" },
 ]
 
 [[package]]
