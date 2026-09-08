@@ -98,7 +98,7 @@ async def check_bridge():
             },
         ),
         Tool(name="notion-check-mcp-next-steps", input_schema={"type": "object"}),
-        Tool(name="notion-stop-session", input_schema={"type": "object"}),
+        *(Tool(name=name, input_schema={"type": "object"}) for name in sorted(BLOCKED_TOOLS)),
         Tool(name="notion-fetch", input_schema={
             "type": "object", "required": ["id"], "properties": {
                 "id": {"type": "string"},

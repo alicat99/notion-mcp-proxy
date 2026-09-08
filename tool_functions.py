@@ -471,7 +471,7 @@ class NotionTools:
         configure=UNSET,
     ):
         """데이터베이스에 유형과 구성을 지정한 뷰를 만든다."""
-        return await self.runtime.call("notion-create-view", {
+        arguments = self.runtime.validate("notion-create-view", {
             "data_source_id": data_source_id,
             "name": name,
             "type": type,
@@ -479,14 +479,18 @@ class NotionTools:
             "parent_page_id": parent_page_id,
             "configure": configure,
         })
+        await self.runtime.permissions.require_view_creation(arguments)
+        return await self.runtime.call("notion-create-view", arguments)
 
     async def update_view(self, *, view_id, name=UNSET, configure=UNSET):
         """뷰의 이름과 필터·정렬·표시 구성을 수정한다."""
-        return await self.runtime.call("notion-update-view", {
+        arguments = self.runtime.validate("notion-update-view", {
             "view_id": view_id,
             "name": name,
             "configure": configure,
         })
+        arguments["view_id"] = await self.runtime.permissions.require_view_update(arguments)
+        return await self.runtime.call("notion-update-view", arguments)
 
     async def show_advanced_analysis_next_steps(self):
         """고급 분석 사용을 위한 다음 단계 안내를 조회한다."""

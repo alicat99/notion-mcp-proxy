@@ -4,6 +4,7 @@ import json
 import re
 import tomllib
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 from xml.etree import ElementTree
 
@@ -25,6 +26,34 @@ class Permissions:
         self.root_id = config["fetch"].get("root_id", "")
 
     #region Access checks
+
+    async def require_view_creation(self, arguments):
+        require_view_config(arguments.get("configure", ""))
+        if arguments["type"] == "form":
+            raise PermissionError("Form views are unsupported")
+        if ("database_id" in arguments) == ("parent_page_id" in arguments):
+            raise PermissionError("Specify exactly one database or page destination")
+        source_id = object_id(arguments["data_source_id"])
+        source, _ = await self._inspect({"id": "collection://" + source_id}, {"data_source"})
+        if "parent_page_id" in arguments:
+            await self.require_target(arguments["parent_page_id"], {"page"})
+        else:
+            database_id = arguments["database_id"]
+            database, _ = await self._inspect({"id": database_id}, {"database"})
+            sources, _ = database_members(database)
+            if sources != {source_id} or object_id(source["url"]) != object_id(database_id):
+                raise PermissionError("Data source must belong to the destination database")
+
+    async def require_view_update(self, arguments):
+        require_view_config(arguments.get("configure", ""))
+        self.require_root()
+        id = view_id(arguments["view_id"])
+        _, entity = await fetch_entity(self.call, {"id": id})
+        if entity["metadata"]["type"] != "view":
+            raise PermissionError("Unexpected target entity type")
+        # Placement is outside the update policy; source ownership still applies.
+        await self._inspect({"id": view_source(entity)}, {"data_source"})
+        return id
 
     async def search_scope(self, arguments):
         self.require_root()
@@ -161,6 +190,21 @@ class Permissions:
 
 
 #region Response parsing
+
+
+def view_id(value):
+    uri = urlsplit(value)
+    if uri.scheme in {"http", "https"}:
+        values = parse_qs(uri.query).get("v", [])
+        if len(values) != 1:
+            raise PermissionError("View URL must contain exactly one v parameter")
+        value = values[0]
+    return "view://" + object_id(value)
+
+
+def require_view_config(configure):
+    if re.search(r"\bFORM\b", configure, re.I):
+        raise PermissionError("FORM configuration is unsupported")
 
 
 def database_path(entity):
