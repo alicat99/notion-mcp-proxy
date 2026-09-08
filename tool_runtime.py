@@ -9,6 +9,13 @@ from permissions import Permissions
 
 UNSET = object()
 BLOCKED_TOOLS = frozenset({
+    "notion-convert-page-to-skill",
+    "notion-ai-search",
+    "notion-search-skills",
+    "notion-create-folder",
+    "notion-update-folder",
+    "notion-create-comment",
+    "notion-get-comments",
     "notion-search-agents",
     "notion-search-sessions",
     "notion-query-sessions",

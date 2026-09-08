@@ -38,7 +38,7 @@ def create_bridge(tools, upstream):
 
     async def call_tool(ctx, params):
         if params.name in BLOCKED_TOOLS:
-            raise MCPError(-32003, "Agent and session tools are disabled")
+            raise MCPError(-32003, "Tool access is disabled")
         if params.name not in functions:
             raise MCPError(INVALID_PARAMS, "Unknown tool")
         arguments = params.arguments or {}
