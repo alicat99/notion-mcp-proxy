@@ -9,6 +9,17 @@ from permissions import Permissions
 
 UNSET = object()
 BLOCKED_TOOLS = frozenset({
+    "notion-list-private-pages",
+    "notion-list-shared-pages",
+    "notion-list-favorite-pages",
+    "notion-list-recent-pages",
+    "notion-download-attachment",
+    "notion-get-async-task",
+    "notion-get-teams",
+    "notion-get-users",
+    "notion-show-advanced-analysis-next-steps",
+    "notion-check-mcp-next-steps",
+
     "notion-convert-page-to-skill",
     "notion-ai-search",
     "notion-search-skills",

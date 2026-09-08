@@ -75,6 +75,7 @@ class NotionTools:
         await self.runtime.permissions.check_entity(id, entity)
         return result
 
+    # 항상 허용: 페이지 경로 권한을 검사하지 않는다. 입력 스키마와 Notion 자체 제한은 적용된다.
     async def create_attachment(
         self, *,
         filename=UNSET,
@@ -92,6 +93,7 @@ class NotionTools:
             "source_file_id": source_file_id,
         })
 
+    # 항상 허용: 페이지 경로 권한을 검사하지 않는다. 입력 스키마와 Notion 자체 제한은 적용된다.
     async def create_file_upload(self, *, filename, content_type=UNSET):
         """로컬 파일을 전송할 업로드 URL을 발급한다."""
         return await self.runtime.call("notion-create-file-upload", {
@@ -99,6 +101,7 @@ class NotionTools:
             "content_type": content_type,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def download_attachment(self, *, file_upload_id):
         """작은 UTF-8 텍스트 첨부의 내용을 읽는다."""
         return await self.runtime.call("notion-download-attachment", {
@@ -293,18 +296,21 @@ class NotionTools:
             "discussion_id": discussion_id,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def get_async_task(self, *, task_id):
         """Notion 비동기 작업의 현재 상태를 읽는다."""
         return await self.runtime.call("notion-get-async-task", {
             "task_id": task_id,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def get_teams(self, *, query=UNSET):
         """워크스페이스의 팀스페이스를 조회한다."""
         return await self.runtime.call("notion-get-teams", {
             "query": query,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def get_users(self, *, query=UNSET, start_cursor=UNSET, page_size=UNSET, user_id=UNSET):
         """워크스페이스의 사용자와 게스트를 조회한다."""
         return await self.runtime.call("notion-get-users", {
@@ -335,6 +341,7 @@ class NotionTools:
             "filter": filter,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def list_private_pages(self, *, limit=UNSET, cursor=UNSET):
         """개인 사이드바의 최상위 페이지와 데이터베이스를 조회한다."""
         return await self.runtime.call("notion-list-private-pages", {
@@ -342,6 +349,7 @@ class NotionTools:
             "cursor": cursor,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def list_shared_pages(self, *, limit=UNSET, cursor=UNSET):
         """공유 사이드바의 페이지와 데이터베이스를 조회한다."""
         return await self.runtime.call("notion-list-shared-pages", {
@@ -349,6 +357,7 @@ class NotionTools:
             "cursor": cursor,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def list_favorite_pages(self, *, limit=UNSET, cursor=UNSET):
         """즐겨찾는 페이지와 데이터베이스를 조회한다."""
         return await self.runtime.call("notion-list-favorite-pages", {
@@ -356,6 +365,7 @@ class NotionTools:
             "cursor": cursor,
         })
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def list_recent_pages(self, *, limit=UNSET, cursor=UNSET):
         """최근 방문한 페이지와 데이터베이스를 조회한다."""
         return await self.runtime.call("notion-list-recent-pages", {
@@ -492,10 +502,12 @@ class NotionTools:
         arguments["view_id"] = await self.runtime.permissions.require_view_update(arguments)
         return await self.runtime.call("notion-update-view", arguments)
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def show_advanced_analysis_next_steps(self):
         """고급 분석 사용을 위한 다음 단계 안내를 조회한다."""
         return await self.runtime.call("notion-show-advanced-analysis-next-steps", {})
 
+    # 차단: MCP 목록에서 제외되며 직접 Python 호출도 PermissionError로 거부한다.
     async def check_mcp_next_steps(self):
         """Notion MCP 사용에 대한 다음 단계 안내를 조회한다."""
         return await self.runtime.call("notion-check-mcp-next-steps", {})

@@ -36,7 +36,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(set(wrapper.functions), set(TOOL_METHODS) - BLOCKED_TOOLS)
         self.assertEqual(len(set(TOOL_METHODS.values())), len(tools))
 
-    def test_all_agent_methods_deny_direct_python_calls(self):
+    def test_all_blocked_methods_deny_direct_python_calls(self):
         upstream = AsyncMock()
         wrapper = NotionTools(upstream, [])
         for name in BLOCKED_TOOLS:
@@ -49,6 +49,19 @@ class BridgeTests(unittest.TestCase):
             with self.subTest(tool=name), self.assertRaises(PermissionError):
                 asyncio.run(method(**arguments))
         upstream.call_tool.assert_not_awaited()
+
+    def test_upload_creation_is_allowed_without_a_root(self):
+        snapshot = Path(__file__).resolve().parents[1] / "notion_tools.json"
+        tools = [Tool.model_validate(item) for item in json.loads(snapshot.read_text(encoding="utf-8"))]
+        upstream = AsyncMock()
+        wrapper = NotionTools(upstream, tools)
+        wrapper.runtime.permissions.root_path = ()
+        asyncio.run(wrapper.create_attachment(filename="test.txt", content="test"))
+        asyncio.run(wrapper.create_file_upload(filename="test.txt"))
+        self.assertEqual([call.args for call in upstream.call_tool.await_args_list], [
+            ("notion-create-attachment", {"filename": "test.txt", "content": "test"}),
+            ("notion-create-file-upload", {"filename": "test.txt"}),
+        ])
 
     def test_optional_arguments_preserve_omission_null_and_false(self):
         schema = {
@@ -97,7 +110,11 @@ async def check_bridge():
                 },
             },
         ),
-        Tool(name="notion-check-mcp-next-steps", input_schema={"type": "object"}),
+        Tool(name="notion-create-attachment", input_schema={
+            "type": "object", "properties": {
+                key: {} for key in ("filename", "content_type", "content", "source_url", "source_file_id")
+            },
+        }),
         *(Tool(name=name, input_schema={"type": "object"}) for name in sorted(BLOCKED_TOOLS)),
         Tool(name="notion-fetch", input_schema={
             "type": "object", "required": ["id"], "properties": {
@@ -120,7 +137,7 @@ async def check_bridge():
                 "metadata": {"type": "page"}, "title": "child",
                 "path": "홈 / test" if params.arguments["id"] == "1" * 32 else "outside",
             }))])
-        if params.name == "notion-check-mcp-next-steps":
+        if params.name == "notion-create-attachment":
             return CallToolResult(
                 content=[TextContent(type="text", text="upstream tool failure")],
                 is_error=True,
@@ -150,7 +167,7 @@ async def check_bridge():
                 assert len(json.loads(stdout)["tools"]) == 3
                 process = await asyncio.create_subprocess_exec(
                     sys.executable, "-X", "utf8", "client.py", "--url", bridge_url,
-                    "--tool", "notion-check-mcp-next-steps",
+                    "--tool", "notion-create-attachment",
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
