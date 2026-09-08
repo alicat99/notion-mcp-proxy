@@ -34,6 +34,9 @@ class Permissions:
             raise PermissionError("Additional search scopes are unsupported")
         if not self.root_id or not await self.require_target(self.root_id, {"page"}):
             raise PermissionError("Search root ID must match the configured root path")
+        if "page_url" in arguments:
+            await self.require_target(arguments["page_url"], {"page"})
+            return arguments["page_url"]
         return self.root_id
 
     async def require_database_creation(self, arguments):

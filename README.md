@@ -135,7 +135,7 @@ root_id = "3d53192c101b801bbfaafa7c74b40cac"
 
 | 도구 | 적용 정책 |
 |---|---|
-| `notion-search` | `page_url`을 루트 ID로 덮어쓴다. 사용자 검색과 추가 범위 지정(`data_source_url`, `teamspace_id`, `filters.teamspace_ids`)은 거부한다. 그 외 검색 조건은 유지한다. |
+| `notion-search` | `page_url` 생략 시 루트 ID를 사용한다. 지정 시 루트 자체 또는 하위 페이지인지 검사한 뒤 입력한 검색 범위를 유지한다. 외부 페이지·DB 객체·잘못된 ID는 거부한다. 사용자 검색과 추가 범위 지정(`data_source_url`, `teamspace_id`, `filters.teamspace_ids`)은 거부한다. 그 외 검색 조건은 유지한다. |
 | `notion-create-database` | 명시적인 내부 페이지 부모 필수. 직접 작성한 비관계형 `schema`만 허용하며 `database_type`은 거부한다. |
 | `notion-update-data-source` | 내부 단일 소스 DB의 소속 검사. DB ID 입력도 실제 `collection://` ID로 변환해 전송한다. 기존 관계형·롤업·알 수 없는 타입·readOnly 속성이 있으면 수정 거부. |
 | `notion-duplicate-page` | 내부 일반 페이지·DB 행만 허용. 루트 자체와 DB 객체는 거부한다. |

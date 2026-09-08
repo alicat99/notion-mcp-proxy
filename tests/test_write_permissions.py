@@ -159,13 +159,21 @@ class WritePermissionTests(unittest.IsolatedAsyncioTestCase):
             await self.wrapper.update_page(page_id=CHILD, command="insert_content", content="x")
         self.assert_no_writes()
 
-    async def test_search_forces_root_and_rejects_other_scopes(self):
+    async def test_search_defaults_to_root_and_accepts_internal_pages(self):
         self.wrapper.runtime.permissions.root_id = ROOT
-        await self.wrapper.search(query="x", page_url=OUTSIDE, max_highlight_length=0)
+        await self.wrapper.search(query="x", max_highlight_length=0)
         self.upstream.call_tool.assert_awaited_with("notion-search", {
             "query": "x", "page_url": ROOT, "max_highlight_length": 0,
         })
+        for page in (ROOT, CHILD, ROW, "https://app.notion.com/p/" + CHILD):
+            await self.wrapper.search(query="x", page_url=page, max_highlight_length=0)
+            self.upstream.call_tool.assert_awaited_with("notion-search", {
+                "query": "x", "page_url": page, "max_highlight_length": 0,
+            })
         self.upstream.call_tool.reset_mock()
+        for page in (OUTSIDE, DB, SOURCE, "self", ""):
+            with self.assertRaises(PermissionError):
+                await self.wrapper.search(query="x", page_url=page)
         for extra in ({"query_type": "user"}, {"data_source_url": SOURCE},
                       {"teamspace_id": OUTSIDE}, {"filters": {"teamspace_ids": [OUTSIDE]}}):
             with self.assertRaises(PermissionError):
