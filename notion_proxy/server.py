@@ -8,7 +8,7 @@ from mcp.server import Server
 from mcp.shared.exceptions import MCPError
 from mcp.types import INVALID_PARAMS, ListToolsResult
 
-from .tool_functions import NotionTools
+from .tool_functions import NotionTools, TOOL_METHODS
 from .tool_runtime import BLOCKED_TOOLS
 from .signed_config import load_config
 from .upstream import connect_upstream
@@ -26,7 +26,7 @@ async def main():
         tools = await upstream.list_tools()
         bridge = create_bridge(tools, upstream)
         app = bridge.streamable_http_app()
-        print(f"Loaded {sum(tool.name not in BLOCKED_TOOLS for tool in tools)} tools. "
+        print(f"Loaded {sum(tool.name in TOOL_METHODS and tool.name not in BLOCKED_TOOLS for tool in tools)} tools. "
               f"Bridge: http://127.0.0.1:{options.port}/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=options.port)
         await uvicorn.Server(config).serve()

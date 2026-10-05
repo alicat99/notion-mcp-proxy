@@ -1,6 +1,7 @@
 """Tool registration, argument validation and common upstream dispatch."""
 
 import inspect
+import logging
 
 from jsonschema import validators
 
@@ -8,6 +9,7 @@ from .permissions import Permissions
 
 
 UNSET = object()
+logger = logging.getLogger(__name__)
 BLOCKED_TOOLS = frozenset({
     "notion-list-private-pages",
     "notion-list-shared-pages",
@@ -53,7 +55,8 @@ class ToolRuntime:
             if tool.name in BLOCKED_TOOLS:
                 continue
             if tool.name not in method_names:
-                raise ValueError(f"Add an explicit wrapper for new tool: {tool.name}")
+                logger.warning("Skipping unsupported new tool: %s. Add an explicit wrapper to enable it.", tool.name)
+                continue
             function = getattr(owner, method_names[tool.name])
             parameters = set(inspect.signature(function).parameters)
             if set(tool.input_schema.get("properties", {})) != parameters:

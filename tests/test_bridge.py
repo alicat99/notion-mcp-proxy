@@ -81,9 +81,21 @@ class BridgeTests(unittest.TestCase):
             "notion-fetch", {"id": "self", "include_transcript": None, "include_discussions": False}
         )
 
-    def test_new_tools_and_changed_parameters_require_explicit_updates(self):
-        with self.assertRaisesRegex(ValueError, "new tool"):
-            NotionTools(AsyncMock(), [Tool(name="notion-new-tool", input_schema={"type": "object"})])
+    def test_new_tools_warn_and_skip_without_interrupting_known_tools(self):
+        snapshot = Path(__file__).resolve().parents[1] / "docs" / "notion_tools.json"
+        tools = [Tool.model_validate(item) for item in json.loads(snapshot.read_text(encoding="utf-8"))]
+        tools.insert(0, Tool(name="notion-new-tool", input_schema={"type": "object"}))
+        upstream = AsyncMock()
+        with self.assertLogs("notion_proxy.tool_runtime", level="WARNING") as logs:
+            wrapper = NotionTools(upstream, tools)
+        self.assertIn("notion-new-tool", logs.output[0])
+        self.assertNotIn("notion-new-tool", wrapper.functions)
+        self.assertNotIn("notion-new-tool", wrapper.runtime.validators)
+        self.assertEqual(set(wrapper.functions), set(TOOL_METHODS) - BLOCKED_TOOLS)
+        asyncio.run(wrapper.create_file_upload(filename="test.txt"))
+        upstream.call_tool.assert_awaited_once_with("notion-create-file-upload", {"filename": "test.txt"})
+
+    def test_changed_parameters_require_explicit_updates(self):
         with self.assertRaisesRegex(ValueError, "changed tool"):
             NotionTools(AsyncMock(), [Tool(name="notion-fetch", input_schema={"type": "object"})])
 
