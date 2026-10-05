@@ -33,10 +33,11 @@ async def main():
 
 
 def create_bridge(tools, upstream):
-    functions = NotionTools(upstream, tools).functions
+    wrappers = NotionTools(upstream, tools)
+    functions = wrappers.functions
 
     async def list_tools(ctx, params):
-        return ListToolsResult(tools=[tool for tool in tools if tool.name in functions])
+        return ListToolsResult(tools=wrappers.runtime.tools)
 
     async def call_tool(ctx, params):
         if params.name in BLOCKED_TOOLS:

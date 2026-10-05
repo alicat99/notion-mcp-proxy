@@ -99,8 +99,61 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed tool"):
             NotionTools(AsyncMock(), [Tool(name="notion-fetch", input_schema={"type": "object"})])
 
+    def test_added_required_parameters_still_reject_startup(self):
+        tool = Tool(name="notion-create-file-upload", input_schema={
+            "type": "object", "properties": {
+                "filename": {"type": "string"}, "content_type": {"type": "string"},
+                "new_required": {"type": "string"},
+            }, "required": ["filename", "new_required"],
+        })
+        with self.assertRaisesRegex(ValueError, "changed tool"):
+            NotionTools(AsyncMock(), [tool])
+
+    def test_optional_additions_do_not_allow_removed_parameters(self):
+        tool = Tool(name="notion-create-file-upload", input_schema={
+            "type": "object", "properties": {
+                "filename": {"type": "string"}, "new_optional": {"type": "string"},
+            }, "required": ["filename"],
+        })
+        with self.assertRaisesRegex(ValueError, "changed tool"):
+            NotionTools(AsyncMock(), [tool])
+
+    def test_http_bridge_ignores_new_optional_parameters(self):
+        asyncio.run(check_optional_parameters())
+
     def test_http_bridge_preserves_tools_arguments_results_and_errors(self):
         asyncio.run(check_bridge())
+
+
+async def check_optional_parameters():
+    tool = Tool(name="notion-create-file-upload", input_schema={
+        "type": "object", "properties": {
+            "filename": {"type": "string"}, "content_type": {"type": "string"},
+            "new_optional": {"type": "boolean"},
+        }, "required": ["filename"], "additionalProperties": False,
+    })
+    upstream = AsyncMock()
+    upstream.call_tool.return_value = CallToolResult(content=[])
+    with unittest.TestCase().assertLogs("notion_proxy.tool_runtime", level="WARNING") as logs:
+        bridge = create_bridge([tool], upstream)
+    assert "new_optional" in logs.output[0]
+    assert "notion-create-file-upload" in logs.output[0]
+    async with serve_http(bridge) as url:
+        async with Client(url) as client:
+            listed = await client.list_tools()
+            assert len(listed.tools) == 1
+            assert set(listed.tools[0].input_schema["properties"]) == {"filename", "content_type"}
+            assert "new_optional" in tool.input_schema["properties"]
+            result = await client.call_tool(tool.name, {"filename": "test.txt"})
+            assert not result.is_error
+            upstream.call_tool.assert_awaited_once_with(tool.name, {"filename": "test.txt"})
+            try:
+                await client.call_tool(tool.name, {"filename": "test.txt", "new_optional": True})
+            except MCPError as error:
+                assert error.code == INVALID_PARAMS
+            else:
+                raise AssertionError("Unsupported optional parameter was accepted")
+            upstream.call_tool.assert_awaited_once()
 
 
 async def check_bridge():

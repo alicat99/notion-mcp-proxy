@@ -51,6 +51,7 @@ class ToolRuntime:
         self.permissions = Permissions(self.call)
         self.functions = {}
         self.validators = {}
+        self.tools = []
         for tool in tools:
             if tool.name in BLOCKED_TOOLS:
                 continue
@@ -59,12 +60,22 @@ class ToolRuntime:
                 continue
             function = getattr(owner, method_names[tool.name])
             parameters = set(inspect.signature(function).parameters)
-            if set(tool.input_schema.get("properties", {})) != parameters:
+            properties = set(tool.input_schema.get("properties", {}))
+            added = properties - parameters
+            if parameters - properties or added & set(tool.input_schema.get("required", [])):
                 raise ValueError(f"Update wrapper parameters for changed tool: {tool.name}")
+            exposed_tool = tool
+            if added:
+                logger.warning("Ignoring unsupported optional parameters for %s: %s. Update the wrapper to enable them.",
+                               tool.name, ", ".join(sorted(added)))
+                exposed_tool = tool.model_copy(deep=True)
+                for parameter in added:
+                    del exposed_tool.input_schema["properties"][parameter]
             self.functions[tool.name] = function
             validator_class = validators.validator_for(tool.input_schema)
             validator_class.check_schema(tool.input_schema)
             self.validators[tool.name] = validator_class(tool.input_schema)
+            self.tools.append(exposed_tool)
 
     async def call(self, name, arguments):
         arguments = self.validate(name, arguments)
