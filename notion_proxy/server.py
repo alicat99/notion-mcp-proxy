@@ -16,9 +16,13 @@ from .signed_config import ROOT, load_config
 from .upstream import connect_upstream
 
 
+DEFAULT_PORT = 6378
+SERVER_NAME = "Notion MCP bridge"
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Notion MCP bridge")
-    parser.add_argument("--port", type=int, default=6378)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--upstream", default="https://mcp.notion.com/mcp")
     parser.add_argument("--no-oauth", action="store_true")
     options = parser.parse_args()
@@ -91,7 +95,7 @@ def create_bridge(tools, upstream, *, lazy=False):
         finally:
             runtime.upstream = previous
 
-    return Server("Notion MCP bridge", on_list_tools=list_tools, on_call_tool=call_tool)
+    return Server(SERVER_NAME, on_list_tools=list_tools, on_call_tool=call_tool)
 
 
 if __name__ == "__main__":
