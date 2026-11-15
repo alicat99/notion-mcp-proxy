@@ -15,6 +15,11 @@ SIMPLE_TYPES = frozenset({
     "phone_number", "status", "files", "created_time", "last_edited_time",
     "created_by", "last_edited_by",
 })
+QUERY_FIELDS = {
+    "rows": {"mode", "data_source_url", "filter", "sort", "limit"},
+    "view": {"mode", "view_url", "start_cursor", "page_size", "archive_status"},
+    "sql": {"mode", "data_source_urls", "query", "params"},
+}
 
 
 class Permissions:
@@ -45,14 +50,37 @@ class Permissions:
 
     async def require_view_update(self, arguments):
         require_view_config(arguments.get("configure", ""))
-        self.require_root()
         id = view_id(arguments["view_id"])
+        await self.require_view_source(id)
+        return id
+
+    async def require_view_source(self, id):
+        self.require_root()
         _, entity = await fetch_entity(self.call, {"id": id})
         if entity["metadata"]["type"] != "view":
             raise PermissionError("Unexpected target entity type")
-        # Placement is outside the update policy; source ownership still applies.
+        # A linked view's placement does not identify the rows it reads.
         await self._inspect({"id": view_source(entity)}, {"data_source"})
-        return id
+
+    async def require_query_sources(self, data):
+        mode = data.get("mode", "sql")
+        if mode not in QUERY_FIELDS or data.keys() - QUERY_FIELDS[mode]:
+            raise PermissionError("Unsupported data source query fields")
+        if mode == "view":
+            id = view_id(data["view_url"])
+            await self.require_view_source(id)
+            return {**data, "view_url": id}
+
+        sources = [data["data_source_url"]] if mode == "rows" else data["data_source_urls"]
+        if not sources:
+            raise PermissionError("Specify at least one data source")
+        for source in dict.fromkeys(sources):
+            if not re.fullmatch(r"collection://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", source):
+                raise PermissionError("Use a collection:// URL with a hyphenated lowercase UUID")
+            await self.require_target(source, {"data_source"})
+        # Notion binds SQLite tables to data_source_urls. Preserve the exact
+        # verified URLs because the SQL text uses them as table names.
+        return data
 
     async def search_scope(self, arguments):
         self.require_root()
@@ -194,7 +222,7 @@ class Permissions:
 def view_id(value):
     uri = urlsplit(value)
     if uri.scheme in {"http", "https"}:
-        values = parse_qs(uri.query).get("v", [])
+        values = parse_qs(uri.query, keep_blank_values=True).get("v", [])
         if len(values) != 1:
             raise PermissionError("View URL must contain exactly one v parameter")
         value = values[0]

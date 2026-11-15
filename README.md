@@ -119,7 +119,7 @@ tool_timeout_sec = 120
 
 ## 지원 도구와 권한 제약
 
-원본 스냅샷 42개 중 **12개를 노출**한다. 10개는 권한 검사 대상이며 업로드 생성 2개는 항상 허용한다. OAuth 모드에서는 처음에 스냅샷을 사용하며, 첫 Notion 연결에 성공하면 실제 도구 명세로 갱신한다. 새 도구는 경고를 남기고 노출·호출 대상에서 제외한다. 기존 도구에 선택 인자만 추가되면 경고를 남기고, 추가 인자는 로컬 MCP 입력 명세에서 제외한다. 해당 인자는 래퍼를 수정하기 전까지 호출할 수 없다. 인자 순서는 비교하지 않는다. 기존 인자 제거·이름 변경 또는 새 필수 인자 추가는 실제 명세를 불러올 때 거부한다.
+원본 스냅샷 42개 중 **13개를 노출**한다. 11개는 권한 검사 대상이며 업로드 생성 2개는 항상 허용한다. OAuth 모드에서는 처음에 스냅샷을 사용하며, 첫 Notion 연결에 성공하면 실제 도구 명세로 갱신한다. 새 도구는 경고를 남기고 노출·호출 대상에서 제외한다. 기존 도구에 선택 인자만 추가되면 경고를 남기고, 추가 인자는 로컬 MCP 입력 명세에서 제외한다. 해당 인자는 래퍼를 수정하기 전까지 호출할 수 없다. 인자 순서는 비교하지 않는다. 기존 인자 제거·이름 변경 또는 새 필수 인자 추가는 실제 명세를 불러올 때 거부한다.
 
 | 도구 | 기능 및 제약 |
 |---|---|
@@ -133,14 +133,23 @@ tool_timeout_sec = 120
 | `notion-update-data-source` | 내부 단일 소스의 소속·기존 및 변경 스키마 검사. 관계형·롤업·미지원 타입·readOnly 속성 또는 `is_inline` 변경 거부 |
 | `notion-create-view` | 목적지와 소스 검사. DB 탭은 소스가 해당 DB 소속인지 대조. 폼 생성·설정 거부 |
 | `notion-update-view` | 참조 소스의 소속 검사. 배치 위치 검사 제외. 폼 설정 거부 |
+| `notion-query-data-sources` | `rows`, `view`, `sql` 모두 지원. 실제 조회 소스가 허용 루트 안에 있는지 확인 |
 | `notion-create-attachment` | 항상 허용. 페이지 경로 검사 없이 첨부 리소스 생성 |
 | `notion-create-file-upload` | 항상 허용. 페이지 경로 검사 없이 업로드 URL 발급 |
+
+DB 조회는 `data` 객체에 모드별 인자를 넣는다.
+
+- `rows`: `data_source_url`에 fetch에서 찾은 `collection://UUID`를 지정한다. `filter`, `sort`, `limit`을 사용할 수 있다.
+- `view`: `view_url`의 뷰를 확인하고, 같은 뷰 ID로 조회한다. 배치 위치와 별개로 뷰가 읽는 실제 소스를 검사한다. `start_cursor`, `page_size`, `archive_status`를 사용할 수 있다.
+- `sql` (기본값): `data_source_urls`의 모든 소스를 확인하고 `query`와 선택적 `params`를 전달한다. Notion의 읽기 전용 SQLite 실행과 지정 목록 밖 테이블 차단에 의존한다. 목록은 비워 둘 수 없다.
+
+조회는 소스 단위로 허용한다. 허용된 소스의 값에 들어 있는 관계·롤업 결과나 외부 링크를 별도로 숨기지는 않는다. 별도 도구인 `notion-query-multiple-data-sources`는 계속 차단한다.
 
 공통 제약:
 
 - 제목 기반 절대 경로가 정확하고 루트 이름이 유일하다는 전제다. 권한 검사 결과는 캐시하지 않는다.
 - 소스는 소속 DB 경로와 소스 목록을 대조하며 단일 소스 구조만 지원한다. DB 객체 자체의 조회는 경로로 판정한다.
-- 뷰 조회는 원본 DB의 뷰 목록 등재 여부도 검사한다. 뷰 수정은 합의한 범위에 따라 배치 검사를 제외한다.
+- `notion-fetch`로 뷰를 읽을 때는 원본 DB의 뷰 목록 등재 여부도 검사한다. 뷰 수정은 합의한 범위에 따라 배치 검사를 제외한다.
 - 폼 생성과 `configure`의 `FORM` 단어를 차단한다. 간단한 검사이므로 대소문자·인용 여부에 관계없이 같은 단어가 포함된 속성명·값도 거부한다. 기존 폼의 이름 변경은 허용한다.
 - DB DDL은 지원 문법 전체를 대조한다. 기본 속성·선택·숫자·수식·고유 ID와 ADD/DROP/RENAME COLUMN, ALTER COLUMN SET 등을 지원하며 미지원 구문은 거부한다.
 - 내부 하위 페이지·DB 삭제와 소스 휴지통 이동은 허용한다. 본문 변경으로 하위를 삭제하려면 `allow_deleting_content: true`를 지정한다.
@@ -163,7 +172,7 @@ tool_timeout_sec = 120
 
 ## 접근을 차단한 Notion MCP 도구
 
-다음 **30개는 MCP 도구 목록에서 제외**한다. 이름을 알아도 호출은 거부되며 직접 Python 래퍼 호출도 동일하게 차단한다.
+다음 **29개는 MCP 도구 목록에서 제외**한다. 이름을 알아도 호출은 거부되며 직접 Python 래퍼 호출도 동일하게 차단한다.
 
 - `notion-ai-search`
 - `notion-check-mcp-next-steps`
@@ -181,7 +190,6 @@ tool_timeout_sec = 120
 - `notion-list-recent-pages`
 - `notion-list-session-events`
 - `notion-list-shared-pages`
-- `notion-query-data-sources`
 - `notion-query-meeting-notes`
 - `notion-query-multiple-data-sources`
 - `notion-query-sessions`

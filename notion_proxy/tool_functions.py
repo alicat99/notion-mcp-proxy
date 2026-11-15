@@ -322,9 +322,9 @@ class NotionTools:
 
     async def query_data_sources(self, *, data):
         """중첩 data 객체의 모드에 따라 행·SQL·뷰를 조회한다."""
-        return await self.runtime.call("notion-query-data-sources", {
-            "data": data,
-        })
+        arguments = self.runtime.validate("notion-query-data-sources", {"data": data})
+        data = await self.runtime.permissions.require_query_sources(arguments["data"])
+        return await self.runtime.call("notion-query-data-sources", {"data": data})
 
     async def query_multiple_data_sources(self, *, query, data_source_urls, params=UNSET, mode=UNSET):
         """여러 데이터 소스를 읽기 전용 SQL로 조회한다. 서버가 노출하는 기존 도구다."""

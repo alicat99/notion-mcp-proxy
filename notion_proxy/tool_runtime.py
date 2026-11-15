@@ -30,7 +30,6 @@ BLOCKED_TOOLS = frozenset({
     "notion-create-comment",
     "notion-get-comments",
     "notion-query-meeting-notes",
-    "notion-query-data-sources",
     "notion-query-multiple-data-sources",
     "notion-search-agents",
     "notion-search-sessions",
