@@ -1,58 +1,74 @@
-import asyncio
-import webbrowser
-from urllib.parse import parse_qs, urlparse
+"""Notion OAuth provider and credential storage."""
+
+import json
+import time
 
 import keyring
-from mcp.client.auth import AuthorizationCodeResult, OAuthClientProvider
+from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
 
-def create_oauth(server_url):
-    return OAuthClientProvider(
+def create_oauth(server_url, storage, redirect_uri, redirect_handler, callback_handler):
+    provider = OAuthClientProvider(
         server_url=server_url,
         client_metadata=OAuthClientMetadata(
-            client_name="Notion Python playground",
-            redirect_uris=["http://127.0.0.1:8765/callback"],
+            client_name="Notion MCP Proxy",
+            redirect_uris=[redirect_uri],
             token_endpoint_auth_method="none",
         ),
-        storage=KeyringStorage(server_url),
-        redirect_handler=open_browser,
-        callback_handler=read_callback,
+        storage=storage,
+        redirect_handler=redirect_handler,
+        callback_handler=callback_handler,
     )
-
-
-async def open_browser(url):
-    print("브라우저에서 승인한 뒤, 이동한 주소 전체를 아래에 붙여넣으세요.")
-    print("콜백 서버를 실행하지 않으므로 브라우저의 연결 실패 화면은 정상입니다.")
-    webbrowser.open(url)
-
-
-async def read_callback():
-    url = await asyncio.to_thread(input, "Callback URL: ")
-    params = parse_qs(urlparse(url).query)
-    if "error" in params:
-        raise RuntimeError(f"OAuth authorization failed: {params['error'][0]}")
-    return AuthorizationCodeResult(
-        code=params["code"][0],
-        state=params["state"][0],
-        iss=params.get("iss", [None])[0],
-    )
+    provider.context.token_expiry_time = storage.expires_at
+    return provider
 
 
 class KeyringStorage:
-    def __init__(self, server_url):
+    def __init__(self, server_url, *, fresh=False):
         self.service = f"notion-proxy-playground:{server_url}"
+        self.tokens = None
+        self.client_info = None
+        self.expires_at = None
+        self.slot = keyring.get_password(self.service, "credentials_slot")
+        if fresh:
+            return
+        if self.slot:
+            data = json.loads(keyring.get_password(self.service, f"tokens_{self.slot}"))
+            self.tokens = OAuthToken.model_validate(data["tokens"])
+            registration = keyring.get_password(self.service, f"client_info_{self.slot}")
+            self.client_info = OAuthClientInformationFull.model_validate_json(registration)
+            self.expires_at = data["expires_at"]
+        else:
+            tokens = keyring.get_password(self.service, "tokens")
+            client_info = keyring.get_password(self.service, "client_info")
+            if tokens and client_info:
+                self.tokens = OAuthToken.model_validate_json(tokens)
+                self.client_info = OAuthClientInformationFull.model_validate_json(client_info)
+                # Legacy storage has no issue time. Refresh before guessing its expiry.
+                self.expires_at = 1.0 if self.tokens.refresh_token else None
 
     async def get_tokens(self):
-        value = keyring.get_password(self.service, "tokens")
-        return OAuthToken.model_validate_json(value) if value else None
+        return self.tokens
 
     async def set_tokens(self, tokens):
-        keyring.set_password(self.service, "tokens", tokens.model_dump_json())
+        expires_at = time.time() + tokens.expires_in if tokens.expires_in is not None else None
+        # Keep entries small for Windows Credential Manager. Stage a matching
+        # token and registration before switching away from the saved pair.
+        slot = "b" if self.slot == "a" else "a"
+        keyring.set_password(self.service, f"client_info_{slot}", self.client_info.model_dump_json())
+        keyring.set_password(self.service, f"tokens_{slot}", json.dumps({
+            "tokens": tokens.model_dump(mode="json"),
+            "expires_at": expires_at,
+        }))
+        keyring.set_password(self.service, "credentials_slot", slot)
+        self.slot = slot
+        self.tokens = tokens
+        self.expires_at = expires_at
 
     async def get_client_info(self):
-        value = keyring.get_password(self.service, "client_info")
-        return OAuthClientInformationFull.model_validate_json(value) if value else None
+        return self.client_info
 
     async def set_client_info(self, client_info):
-        keyring.set_password(self.service, "client_info", client_info.model_dump_json())
+        # Publish the registration only once it has a matching token.
+        self.client_info = client_info

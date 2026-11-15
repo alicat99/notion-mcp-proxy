@@ -1,8 +1,8 @@
 #region 사용 예시
 # 서버 구현과 독립된 참고용 클라이언트다. 프로젝트 루트에서 실행한다.
-# 먼저 별도 터미널에서 서버를 시작하고 OAuth 연결을 완료한다.
+# 먼저 별도 터미널에서 서버를 시작한다.
 #   uv run --frozen python -X utf8 -m notion_proxy.server
-# 클라이언트에서는 OAuth 로그인을 하지 않는다.
+# 도구 오류에 Notion 승인 링크가 포함되면 브라우저에서 승인한 뒤 같은 호출을 다시 실행한다.
 #
 # 전체 도구 목록과 입력 스키마:
 #   uv run --frozen python -X utf8 examples/client.py

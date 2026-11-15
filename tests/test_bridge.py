@@ -216,7 +216,7 @@ async def check_bridge():
 
     remote = Server("fixture", on_list_tools=list_tools, on_call_tool=call_tool)
     async with serve_http(remote) as remote_url:
-        async with connect_upstream(remote_url, use_oauth=False) as upstream:
+        async with connect_upstream(remote_url) as upstream:
             discovered = await upstream.list_tools()
             assert [tool.name for tool in discovered] == [tool.name for tool in tools]
             with patch("notion_proxy.permissions.load_config", return_value={"fetch": {"root_path": ["홈", "test"]}}):

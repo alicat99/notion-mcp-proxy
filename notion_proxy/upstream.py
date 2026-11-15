@@ -5,12 +5,9 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from .oauth import create_oauth
-
 
 @asynccontextmanager
-async def connect_upstream(url, use_oauth=True):
-    auth = create_oauth(url) if use_oauth else None
+async def connect_upstream(url, *, auth=None):
     async with httpx2.AsyncClient(auth=auth, timeout=120) as http_client:
         transport = streamable_http_client(url, http_client=http_client)
         async with Client(transport) as client:
